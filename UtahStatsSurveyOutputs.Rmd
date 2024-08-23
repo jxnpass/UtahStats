@@ -1,0 +1,3358 @@
+---
+title: UtahStatsSurvey Outputs
+output: pdf_document
+---
+
+```{r}
+setwd("PDF")
+```
+
+
+```{r setup}
+
+library(tidyverse)
+library(table1)
+library(ggrepel)
+library(scales)
+library(kableExtra)
+
+source("eda-functions.R")
+
+raw_survey <- read_csv("../ProvoStatsSurvey6-28.csv")
+nrow(raw_survey) - 2
+
+survey_male <- read_csv("../ProvoStatsSurveyMale.csv") 
+survey_female <- read_csv("../ProvoStatsSurveyFemale.csv")
+survey_other <- read_csv("../ProvoStatsSurveyOther.csv") 
+
+survey <- rbind(survey_male[,-c(67:70)], 
+                survey_female[,-c(67:70)], 
+                survey_other) %>% 
+  arrange(USERID)
+nrow(survey)
+
+# picture resolution
+pic_res <- 1080
+```
+
+# Our Sample Demograpihcs
+
+## Table 1.1
+Table1 of demographic info
+```{r}
+
+t1.1_cols <- c(5:7, 9:10, 12:16, 32, 36)
+
+t1.1 <- survey %>% 
+#  filter_na_out(col_name = s1_cols) %>% 
+  select(all_of(t1.1_cols)) %>% 
+  reset_sex() %>% 
+  reset_origin() %>% 
+  reset_college() %>% 
+  mutate(Q4_Ethnicity = ifelse(Q4_Ethnicity == "White", "White", "Other")) %>% 
+  stateside_mission() %>% 
+  mutate(Q9_Height = Q9_Height / 12)
+
+# Use the custom rendering function in table1
+table1(
+  ~ . | Q3_Sex, 
+  data = t1.1,
+  rowlabelhead = "Sex",
+  render.continuous = render_t1
+)
+
+# insight 1
+quantile(t1.1$Q2_Age)
+
+```
+
+## Figure 1.1
+Heat map of where people are from from US
+
+```{r}
+
+state_survey <- survey %>% 
+  group_by(Q7_Origin) %>% 
+  summarise(Count = n()) %>% 
+  rename(State = Q7_Origin)
+
+map_survey <- inner_join(map_us, state_survey, by = "State")
+names(map_survey) <- c("x", "y", "group", "order", "id", "subregion", "Count")
+
+centroid_data <- state_centroids %>%
+  inner_join(state_survey, by = c("State" = "State"))
+
+
+f1.1 <- ggplot() +
+  geom_map(data = map_survey, map = map_survey, 
+           aes(x = x, y = y, map_id = id, fill = Count), 
+           color = "black") +
+  geom_label_repel(data = centroid_data, 
+                   aes(x = x, y = y, 
+                       label = paste(State, Count, sep = ":")),
+                   size = 1.75,
+                   color = "black", 
+                   show.legend = FALSE,
+                   box.padding = .25, 
+                   point.padding = .25, 
+                   segment.color = 'grey50') +
+  scale_fill_gradientn(name = "Size", 
+                       colors = color_2_breaks,
+                       transform = "log2") +
+  labs(title = "  Survey Sample by State", 
+       subtitle = "  Alaska = 11\n  Hawaii = 12",
+       y = " ") +
+  theme_void() +
+  add_theme +
+  theme(axis.title.x = element_blank())
+
+png(filename = "S1/figure1.1.png", width = 6, height = 4, units = "in", res = pic_res)
+
+print(f1.1)
+
+dev.off()
+
+```
+
+## Figure 1.2
+Bar chart of Ethnicity
+
+```{r}
+
+f1.2_cols <- c(6, 7)
+
+f1.2_data <- survey %>% 
+  filter_na_out(f1.2_cols) %>% 
+  select(all_of(f1.2_cols)) %>% 
+  filter_sex() %>% 
+  reset_ethnicity() %>% 
+  mutate(Q4_Ethnicity = ifelse(Q4_Ethnicity == "Other", "All Other", Q4_Ethnicity))
+
+f1.2_summary <- f1.2_data %>% 
+  group_by(Q3_Sex, Q4_Ethnicity) %>% 
+  summarise(Count = n()) %>% 
+  mutate(prop = Count/sum(Count)) %>% 
+  arrange(desc(prop)) %>% 
+  ungroup() %>% 
+  mutate(cum_prop = c(.922, .901, .924, .939, .985, .985, .96, .965))
+
+f1.2 <- ggplot(f1.2_summary, aes(x = Q3_Sex, y = prop, 
+                                 fill = Q4_Ethnicity)) +
+  geom_col(width = .8, color = "black") +
+  scale_fill_manual(values = c(col3, col4, col5, col1)) +
+  
+  # Text labels within the bars for larger proportions
+  geom_text(data = f1.2_summary %>% 
+              filter(prop > .8),
+            aes(label = paste(percent(prop, accuracy = .1))),
+            size = 5,
+            show.legend = F,
+            position = position_stack(vjust = .5)) +
+  
+  # Labels outside the bars for smaller proportions
+  geom_label_repel(data = f1.2_summary %>% 
+               filter(prop < .8), 
+                   aes(y = cum_prop, 
+                       label = paste(percent(prop, accuracy = .1))),
+                   size = 3,
+                   color = "black", 
+                   show.legend = FALSE,
+                   nudge_x = .4) +
+  
+  labs(title = "Survey Sample by Ethnicity",
+       fill = "",
+       x = "",
+       y = "Proportion") +
+  theme(axis.title.x = element_blank(),
+        legend.title = element_blank()) +
+  add_theme +
+  add_y_percent
+
+
+
+
+png(filename = "S1/figure1.2.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f1.2)
+
+dev.off()
+
+
+```
+
+## Figure 1.3
+Gender Pie Chart
+
+```{r}
+
+f1.3_cols <- c(6)
+
+f1.3_data <- survey %>% 
+  filter_na_out(f1.3_cols) %>% 
+  select(all_of(f1.3_cols)) %>% 
+  reset_sex() 
+
+f1.3_summary <- f1.3_data %>% 
+  group_by(Q3_Sex) %>% 
+  summarise(Count = n()) %>% 
+  mutate(prop = Count/sum(Count)) %>% 
+  ungroup() %>% 
+  mutate(ypos = c(.75, .25, 1))
+
+f1.3 <- ggplot(f1.3_summary, aes(x="", y=prop, fill=Q3_Sex)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start=0) +
+  geom_text(data = f1.3_summary %>% 
+              filter(Q3_Sex != "Other"),
+            aes(y = ypos, label = 
+                  paste(Q3_Sex, "\n", percent(prop, accuracy = .1))), color = "white", size=6) +
+  geom_label_repel(data = f1.3_summary %>% 
+                     filter(Q3_Sex == "Other"),
+                   aes(y = ypos, label = 
+                         paste(Q3_Sex, "\n", 
+                               percent(prop, accuracy = .1))),
+                   nudge_x = .4,
+                   color = "white", size=3) +
+  theme_void() +
+  labs(title = "Survey Sample and Gender") +
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        legend.position = "none") +
+  scale_fill_manual(values = c(col2, col7, col3))
+
+png(filename = "S1/figure1.3.png", width = 4, height = 4, units = "in", res = 540)
+
+print(f1.3)
+
+dev.off()
+
+```
+
+
+# College Statistics
+
+## Figure 2.1 
+Proportions and Colleges
+
+```{r}
+
+f2.1_cols <- c(6, 16)
+
+f2.1_data <- survey %>% 
+  filter_na_out(f2.1_cols) %>% 
+  filter_sex() %>% 
+  select(all_of(f2.1_cols)) %>% 
+  reset_college() %>% 
+  group_by(Q3_Sex, Q13_CollegeName) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Proportion = Count/sum(Count))
+
+f2.1 <- ggplot(data = f2.1_data,
+       mapping = aes(x = Q13_CollegeName, y = Proportion, fill = Q3_Sex)) +
+  geom_col(color = "black", position = 'dodge2') +
+  geom_text(data = f2.1_data %>% 
+              filter(Count > 30),
+            mapping = aes(label = percent(Proportion,
+                                          accuracy = .1)),
+            color = "white",
+            position = position_dodge2(width = .9),
+            vjust = 2, 
+            size = 3) +
+  geom_text(data = f2.1_data %>% 
+              filter(Count < 30),
+            mapping = aes(label = percent(Proportion,
+                                          accuracy = .1)),
+            position = position_dodge2(width = .9),
+            vjust = -.5,
+            size = 3) +
+  labs(title = "Gender and Attending College",
+       subtitle = "n = 1867",
+       fill = "Sex") +
+  scale_fill_manual(values = c(col7, col2)) +
+  add_theme +
+  add_y_percent +
+  theme(axis.title.y = element_blank(), 
+        axis.title.x = element_blank(),
+        legend.title = element_blank()) +
+  remove_vertical_gridlines
+
+png(filename = "S2/figure2.1.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f2.1)
+
+dev.off()
+
+```
+
+## Figure 2.2 
+
+```{r}
+
+f2.2_cols <- c(16, 17)
+
+f2.2_data <- survey %>% 
+  filter_na_out(f2.2_cols) %>% 
+  select(all_of(f2.2_cols)) %>% 
+  reset_college() %>% 
+  filter(Q13_CollegeName != "None") 
+
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+f2.2_modes <- f2.2_data %>% 
+  group_by(Q13_CollegeName) %>% 
+  summarise(GPA_Mode = Mode(Q14_CollegeGPA))
+
+f2.2 <- ggplot(f2.2_data, aes(fill = Q13_CollegeName, x = Q14_CollegeGPA)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 15,
+                 position = "identity", alpha = 0.6, color = col2,
+                 show.legend = F) +
+  facet_wrap(~ Q13_CollegeName) +
+  labs(title = "Attending College and GPA",
+       subtitle = "n = 1572",
+       x = "GPA",
+       y = "Density") +
+  scale_fill_manual(values = c(col2, coluvu, col3)) +
+  add_theme 
+
+png(filename = "S2/figure2.2.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f2.2)
+
+dev.off()
+
+```
+
+## Table 2.1
+GPA and College at BYU
+
+```{r}
+
+source("../BYUWebscrape/byu_college_majors_add.R")
+
+t2.1_cols <- c(6,16,17,18)
+
+t2.1_data <- survey %>% 
+  filter_na_out(t2.1_cols) %>% 
+  select(all_of(t2.1_cols)) %>% 
+  filter_sex() %>% 
+  filter(Q13_CollegeName == "BYU") %>% 
+  clean_byu_major_names() %>% 
+  left_join(cdm_final, by = join_by(Q15_Major == major)) %>% 
+  filter(!is.na(college)) 
+# cdm_final from script byu_college_majors_add.R
+
+t2.1_filter <- t2.1_data %>% 
+  group_by(college) %>% 
+  summarise(Count = n()) %>% 
+  arrange(desc(Count)) %>% 
+  head(5) %>% 
+  pull(college)
+
+# calculating ratios of men/women in department
+t2.1_ratios <- t2.1_data %>% 
+  filter(college %in% t2.1_filter) %>% 
+  group_by(Q3_Sex, college) %>% 
+  summarise(Count = n()) %>% 
+  ungroup() %>% 
+  spread(Q3_Sex, Count) %>%
+  replace_na(list(Female = 0, Male = 0)) %>% 
+  group_by(college) %>% 
+  reframe(FM_Ratio = paste(Female, Male, sep = "/")) 
+
+t2.1_data <- t2.1_data %>% 
+  filter(college %in% t2.1_filter)
+
+# female/male count
+
+sum(t2.1_data$Q3_Sex == "Male")
+sum(t2.1_data$Q3_Sex == "Female")
+nrow(t2.1_data)
+
+table1(
+  ~ Q14_CollegeGPA + college | Q3_Sex + college, 
+  data = t2.1_data %>% 
+    filter(college %in% t2.1_filter) %>% 
+    mutate(college = factor(college, levels = t2.1_filter)),
+  rowlabelhead = "Sex", transpose = F, 
+  render.continuous = render_t1)
+
+# insight 2 (sig in college to GPA)?
+lm_college <- lm(Q14_CollegeGPA ~ college, data = t2.1_data)
+anova(lm_college)
+
+t2.1_test <- t2.1_data %>% filter(college %in% t2.1_filter)
+
+lm_college5 <- lm(Q14_CollegeGPA ~ college, 
+                  data = t2.1_test)
+anova(lm_college5)
+lm_college5_sex <- lm(Q14_CollegeGPA ~ college * Q3_Sex, 
+                  data = t2.1_test)
+anova(lm_college5_sex)
+
+# insight 3
+chisq_test(x = t2.1_test, college ~ Q3_Sex)
+chix_dep10_sex <- chisq.test(x = t2.1_test$Q3_Sex, y = t2.1_test$department)
+chix_dep10_sex$observed - chix_dep10_sex$expected
+
+```
+
+## Figure 2.3
+GPA and Department at BYU
+
+```{r}
+
+# source("../BYUWebscrape/byu_college_majors_add.R")
+
+f2.3_cols <- c(6,16,17,18)
+
+f2.3_data <- survey %>% 
+  filter_na_out(f2.3_cols) %>% 
+  select(all_of(f2.3_cols)) %>% 
+  filter_sex() %>% 
+  filter(Q13_CollegeName == "BYU") %>% 
+  clean_byu_major_names() %>% 
+  left_join(cdm_final, by = join_by(Q15_Major == major)) %>% 
+  filter(!is.na(department)) %>% 
+  clean_misc_major() %>% 
+  mutate(department = str_replace(department, " ", "\n"))
+
+f2.3_filter <- f2.3_data %>% 
+  group_by(department) %>% 
+  summarise(Count = n()) %>% 
+  arrange(desc(Count)) %>% 
+  head(10) %>% 
+  pull(department)
+
+# calculating ratios of men/women in department
+f2.3_ratios <- f2.3_data %>% 
+  filter(department %in% f2.3_filter) %>% 
+  group_by(Q3_Sex, department) %>% 
+  summarise(Count = n()) %>% 
+  ungroup() %>% 
+  spread(Q3_Sex, Count) %>%
+  replace_na(list(Female = 0, Male = 0)) %>% 
+  group_by(department) %>% 
+  reframe(FM_Ratio = paste(Female, Male, sep = ":")) 
+  
+
+f2.3_summary <- f2.3_data %>% 
+  filter(department %in% f2.3_filter) %>% 
+  group_by(department, Q3_Sex) %>% 
+  summarise(MeanGPA = mean(Q14_CollegeGPA)) %>% 
+  arrange(desc(MeanGPA)) %>% 
+  ungroup() %>% 
+  group_by(department)
+
+f2.3_summary <- f2.3_data %>% 
+  filter(department %in% f2.3_filter) %>% 
+  group_by(department) %>% 
+  summarise(GroupMeanGPA = mean(Q14_CollegeGPA)) %>% 
+  full_join(f2.3_summary, by = "department") %>% 
+  arrange(desc(GroupMeanGPA), department) 
+  
+
+# female/male count
+
+f2.3 <- ggplot() +
+  geom_col(data = f2.3_summary,
+           mapping = aes(x = fct_inorder(department), 
+                         y = MeanGPA, fill = Q3_Sex),
+           position = "dodge", color = "black") +
+  geom_text(data = f2.3_ratios, 
+            fontface = "bold",
+            mapping = aes(x = department, 
+                          label = paste("N =", FM_Ratio)),
+            size = 2,
+            y = -.1) +
+  geom_text(data = f2.3_summary, 
+            mapping = aes(x = department, 
+                          y = MeanGPA,
+                          fill = Q3_Sex,
+                          label = format(MeanGPA, digits = 3)),
+            position = position_dodge(width = .9),
+            vjust = 1.5,
+            size = 2,
+            color = "white"
+            ) +
+  labs(title = "GPA and Top 10 BYU Majors",
+       y = "Mean GPA",
+       x = "\nBYU Department",
+       fill = "") +
+  scale_fill_manual(values = c(col7, col2)) +
+  add_tilt +  
+  add_theme +
+  remove_gridlines
+
+png(filename = "S2/figure2.3.png", width = 7, height = 4, units = "in", res = 540)
+
+print(f2.3)
+
+dev.off()
+
+# insight 4 (significance between gpa and department?)
+lm_dep <- lm(Q14_CollegeGPA ~ department, data = f2.3_data)
+anova(lm_dep)
+
+f2.3_test <- f2.3_data %>% filter(department %in% f2.3_filter)
+
+lm_dep10 <- lm(Q14_CollegeGPA ~ department, 
+                 data = f2.3_test)
+anova(lm_dep10)
+lm_dep10_sex <- lm(Q14_CollegeGPA ~ department * Q3_Sex, 
+                 data = f2.3_test)
+anova(lm_dep10_sex)
+
+# insight 5 department choice and gender
+
+chisq_test(x = f2.3_test, department ~ Q3_Sex)
+chix_dep10_sex <- chisq.test(x = f2.3_test$Q3_Sex, y = f2.3_test$department)
+chix_dep10_sex$observed - chix_dep10_sex$expected
+
+```
+
+## Figure 2.4
+GPA and Dating
+
+```{r}
+
+f2.4_cols <- c(6, 17, 48, 50, 51)
+
+f2.4_data <- survey %>% 
+  filter_na_out(f2.4_cols) %>% 
+  select(all_of(f2.4_cols)) %>% 
+  filter_sex() %>% 
+  group_GPA()
+
+f2.4_filter <- f2.4_data %>% 
+  group_by(GPA_letter) %>% 
+  summarise(Count = n()) %>% 
+  ungroup() %>% 
+  filter(Count >= 30) %>% pull(GPA_letter)
+
+f2.4_data <- f2.4_data %>% 
+  filter(GPA_letter %in% f2.4_filter)
+
+f2.4_results <- summarySE(data = f2.4_data, measurevar = "Q45_KissCount", 
+          groupvars = c("GPA_letter", "Q3_Sex"))
+
+pd <- position_dodge(0.25)
+
+f2.4 <- ggplot(f2.4_results, aes(x = GPA_letter, y = Q45_KissCount, 
+                         color = Q3_Sex, group = Q3_Sex)) + 
+  geom_errorbar(aes(ymin = Q45_KissCount - ci, 
+                    ymax = Q45_KissCount + ci), 
+                width = .1, position = pd, show.legend = F) +
+  geom_line(position = pd, size = 1, show.legend = F) +
+  geom_point(position = pd, size = 3) +
+  labs(title = "GPA Letter Grade and 95% CI Kiss Count",
+       subtitle = paste("n =", nrow(f2.4_data)),
+       y = "Kiss Count",
+       x = "",
+       color = "") +
+  scale_color_manual(values = c(col7, col2)) +
+  add_theme +
+  remove_vertical_gridlines
+
+png(filename = "S2/figure2.4.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f2.4)
+
+dev.off()
+
+# insight
+lm_kisscountgpaletter <- lm(Q45_KissCount ~ GPA_letter + Q3_Sex, data = f2.4_data)
+anova(lm_kisscountgpaletter)
+lm_kisscountgpa <- lm(sqrt(Q45_KissCount) ~ Q14_CollegeGPA + Q3_Sex, data = f2.4_data)
+summary(lm_kisscountgpa)
+
+lm_ncmogpa <- lm(sqrt(Q46_NCMOCount) ~ Q14_CollegeGPA + Q3_Sex, data = f2.4_data)
+summary(lm_ncmogpa)
+
+lm_relationsgpa <- lm(sqrt(Q47_RelationshipCount) ~ Q14_CollegeGPA + Q3_Sex, data = f2.4_data)
+summary(lm_relationsgpa)
+
+```
+
+## Table 2.2 
+Grade Letter, Gender, and Kiss Count
+
+```{r}
+
+t2.2 <- f2.4_data %>% 
+  group_by(GPA_letter, Q3_Sex) %>% 
+  summarise(
+    N = n(),
+    mean_kiss = mean(Q45_KissCount, na.rm = TRUE),
+    se_kiss = sd(Q45_KissCount, na.rm = TRUE) / sqrt(n()),
+    mean_ncmo = mean(Q46_NCMOCount, na.rm = TRUE),
+    se_ncmo = sd(Q46_NCMOCount, na.rm = TRUE) / sqrt(n()),
+    mean_relationship = mean(Q47_RelationshipCount, na.rm = TRUE),
+    se_relationship = sd(Q47_RelationshipCount, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  ungroup()
+
+kable(t2.2, digits = 2)
+
+```
+
+
+## Figure 2.5 
+University and Kiss Count
+
+```{r}
+
+f2.5_cols <- c(16, 48, 50, 51)
+
+f2.5_data <- survey %>% 
+  filter_na_out(f2.5_cols) %>% 
+  select(all_of(f2.5_cols)) %>% 
+  reset_college()
+
+f2.5_results <- summarySE(data = f2.5_data,
+                          measurevar = "Q45_KissCount",
+                          groupvars = "Q13_CollegeName") %>% 
+  arrange(Q45_KissCount)
+
+f2.5 <- ggplot(f2.5_results, aes(x = fct_inorder(Q13_CollegeName), 
+                         y = Q45_KissCount,
+                         fill = fct_inorder(Q13_CollegeName))) + 
+  geom_bar(show.legend = F, color = "black",
+           position=position_dodge(), stat="identity") +
+  geom_errorbar(aes(ymin = Q45_KissCount - ci, 
+                    ymax = Q45_KissCount + ci), 
+                width = .1, show.legend = F) +
+  geom_point(show.legend = F, size = 3) +
+  scale_fill_manual(values = c(col2, col3, coluvu, col7)) +
+  labs(title = "University and 95% CI Kiss Count",
+       subtitle = paste("n =", nrow(f2.5_data)),
+       y = "Kiss Count",
+       x = "") +
+  add_theme 
+
+png(filename = "S2/figure2.5.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f2.5)
+
+dev.off()
+
+# insight
+lm_unikiss <- lm((Q45_KissCount) ~ Q13_CollegeName, data = f2.5_data)
+summary(lm_unikiss)
+lm_unincmo <- lm((Q46_NCMOCount) ~ Q13_CollegeName, data = f2.5_data)
+summary(lm_unincmo)
+lm_unirel <- lm((Q47_RelationshipCount) ~ Q13_CollegeName, data = f2.5_data)
+summary(lm_unirel)
+
+```
+
+## Table 2.3
+University and Kiss Count, NCMO, and Relationships
+
+```{r}
+
+t2.3 <- f2.5_data 
+
+table1(~ . | Q13_CollegeName, 
+       data = t2.3,
+       render.continuous = render_t1)
+
+
+```
+
+## Figure 2.6a
+BYU College and Kiss Count
+
+```{r}
+
+f2.6_cols <- c(6, 16, 18, 48, 50, 51)
+
+f2.6_data <- survey %>% 
+  filter_na_out(f2.6_cols) %>% 
+  select(all_of(f2.6_cols)) %>% 
+  filter_sex() %>% 
+  clean_byu_major_names() %>% 
+  left_join(cdm_final, by = join_by(Q15_Major == major)) %>% 
+  filter(!is.na(department)) %>% 
+  clean_misc_major() %>% 
+  acronym_college()
+
+f2.6_filter <- f2.6_data %>% 
+  group_by(college) %>% 
+  summarise(Count = n(),
+            MeanKiss = mean(Q45_KissCount)) %>% 
+  arrange(desc(Count)) %>% 
+  head(10) %>%
+  arrange(desc(MeanKiss)) %>% 
+  pull(college)
+
+f2.6_data <- f2.6_data %>% filter(college %in% f2.6_filter) %>% 
+  mutate(college = factor(college, levels = f2.6_filter))
+
+f2.6_results <- summarySE(data = f2.6_data, 
+                          measurevar = "Q45_KissCount",
+                          groupvars = "college")
+
+
+f2.6a <- ggplot(f2.6_results, aes(x = college, y = Q45_KissCount)) + 
+  geom_col(size = 3, position = 'dodge', fill = col6) +
+  geom_errorbar(aes(ymin = ifelse(Q45_KissCount - ci < 0, 0,
+                                  Q45_KissCount - ci), 
+                    # special case for CI interval less than 0
+                    ymax = Q45_KissCount + ci), 
+                width = .1, position = position_dodge(width = .9), show.legend = F) +
+  labs(title = "Top 10 BYU College and 95% CI Kiss Count",
+       subtitle = paste("n =", nrow(f2.6_data)),
+       y = "Kiss Count",
+       x = "",
+       color = "") +
+  geom_label(mapping = aes(label = format(Q45_KissCount, digits = 3))) +
+  ylim(0, NA) +
+  add_theme +
+  add_tilt +
+  remove_vertical_gridlines
+
+png(filename = "S2/figure2.6a.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f2.6a)
+
+dev.off()
+
+# insight
+
+lm_kisscollege <- lm(Q45_KissCount ~ college, data = f2.6_data)
+anova(lm_kisscollege)
+
+f2.6_data %>% 
+  pairwise_t_test(
+    Q45_KissCount ~ college, paired = F,
+    p.adjust.method = "fdr"
+    ) %>% 
+  arrange(p)
+# same thing for other two vars (NCMO and relationships)
+
+```
+
+## Figure 2.6b
+BYU Department and Kiss Count
+
+```{r}
+# redoing most coding just replacing college w department
+
+f2.6_data <- survey %>% 
+  filter_na_out(f2.6_cols) %>% 
+  select(all_of(f2.6_cols)) %>% 
+  filter_sex() %>% 
+  clean_byu_major_names() %>% 
+  left_join(cdm_final, by = join_by(Q15_Major == major)) %>% 
+  filter(!is.na(department)) %>% 
+  clean_misc_major() %>% 
+  acronym_college()
+
+f2.6_filter <- f2.6_data %>% 
+  group_by(department) %>% 
+  summarise(Count = n(),
+            MeanKiss = mean(Q45_KissCount)) %>% 
+  arrange(desc(Count)) %>% 
+  head(10) %>%
+  arrange(desc(MeanKiss)) %>% 
+  pull(department)
+
+f2.6_data <- f2.6_data %>% filter(department %in% f2.6_filter) %>% 
+  mutate(department = factor(department, levels = f2.6_filter))
+
+f2.6_results <- summarySE(data = f2.6_data, 
+                          measurevar = "Q45_KissCount",
+                          groupvars = "department")
+
+
+f2.6b <- ggplot(f2.6_results, aes(x = department, 
+                                 y = Q45_KissCount)) + 
+  geom_col(size = 3, position = 'dodge', fill = col6) +
+  geom_errorbar(aes(ymin = ifelse(Q45_KissCount - ci < 0, 0,
+                                  Q45_KissCount - ci), 
+                    # special case for CI interval less than 0
+                    ymax = Q45_KissCount + ci), 
+                width = .1, position = position_dodge(width = .9), show.legend = F) +
+  labs(title = "Top 10 Departments and 95% CI Kiss Count",
+       subtitle = paste("n =", nrow(f2.6_data)),
+       y = "Kiss Count",
+       x = "",
+       color = "") +
+  geom_label(mapping = aes(label = format(Q45_KissCount, digits = 3))) +
+  ylim(0, NA) +
+  add_theme +
+  add_tilt +
+  remove_vertical_gridlines
+
+png(filename = "S2/figure2.6b.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f2.6b)
+
+dev.off()
+
+# insight
+lm_kissdep <- lm(Q47_RelationshipCount ~ department, data = f2.6_data)
+anova(lm_kissdep)
+
+f2.6_data %>% 
+  pairwise_t_test(
+    Q45_KissCount ~ department, paired = F,
+    p.adjust.method = "fdr"
+    ) %>% 
+  arrange(p)
+
+```
+
+LDS Church and Mission
+
+## Figure 3.1 
+Bar chart of Mission
+
+```{r}
+
+f3.1_cols <- c(6, 36)
+
+f3.1_data <- survey %>% 
+  select(all_of(f3.1_cols)) %>% 
+  filter_sex() %>% 
+  stateside_mission()
+
+f3.1_summary <- f3.1_data %>% 
+  group_by(Q3_Sex, SERVED_US_MISSION) %>% 
+  summarise(Count = n()) %>% 
+  mutate(prop = Count/sum(Count)) %>% 
+  mutate(SERVED_US_MISSION = case_when(
+    SERVED_US_MISSION == "No" ~ "Foreign",
+    SERVED_US_MISSION == "Yes" ~ "Stateside",
+    T ~ SERVED_US_MISSION
+  ))
+
+f3.1 <- ggplot(f3.1_summary, aes(x = Q3_Sex, y = prop, 
+                                 fill = SERVED_US_MISSION)) +
+  geom_col(width = .8, color = "black", position = position_stack(reverse = T)) +
+  scale_fill_manual(values = c(col5, col4, col6)) +
+  geom_text(aes(label = paste(percent(prop, accuracy = .1))),
+            size = 5,
+            show.legend = F,
+            position = position_stack(reverse = T),
+            vjust = 1.5) +
+  labs(title = "Gender and LDS Mission Served",
+       subtitle = paste("n =", nrow(f3.1_data)),
+       fill = "Mission Location") +
+  add_theme +
+  add_y_percent +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.title = element_blank()) +
+  remove_vertical_gridlines
+
+
+png(filename = "S3/figure3.1.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f3.1)
+
+dev.off()
+
+# insight
+
+chix_mission_sex <- chisq_test(SERVED_US_MISSION ~ Q3_Sex, 
+                               x = f3.1_data)
+
+```
+
+## Figure 3.2 
+Mission Location and Relationships
+
+
+```{r}
+
+
+f3.2_cols <- c(5, 6, 9, 36)
+
+f3.2_data <- survey %>% 
+  select(all_of(f3.2_cols)) %>% 
+  stateside_mission() %>% 
+  filter_na_out("Q6_RelationshipStatus") %>% 
+  filter_relationships() %>% 
+  filter_sex() %>% 
+  filter(Q2_Age >= 21) %>% 
+    mutate(SERVED_MISSION = case_when(
+    SERVED_US_MISSION != "Did Not Serve" ~ "Served a Mission",
+    SERVED_US_MISSION == "Did Not Serve" ~ "No Mission"  
+    )) %>% 
+  mutate(RM_Sex = interaction(SERVED_MISSION, Q3_Sex)) %>% 
+  mutate(RM_Sex = case_when(
+    RM_Sex == "Served a Mission.Male" ~ "Male RM",
+    RM_Sex == "Served a Mission.Female" ~ "Female RM",
+    RM_Sex == "No Mission.Female" ~ "Female",
+    RM_Sex == "No Mission.Male" ~ "Male"
+    )) %>% 
+  mutate(RM_Sex = factor(RM_Sex, levels = c("Male", "Male RM", "Female", "Female RM")))
+
+f3.2_summary <- f3.2_data %>% 
+  group_by(RM_Sex, Q6_RelationshipStatus) %>% 
+  summarise(Count = n()) %>%
+  mutate(prop = Count/sum(Count))
+
+f3.2 <- ggplot(f3.2_summary, aes(x = RM_Sex,
+                                 y = prop, 
+                                 fill = Q6_RelationshipStatus)) +
+  geom_col(width = .8, color = "black") +
+  scale_fill_manual(values = color_3_breaks) +
+  geom_text(aes(label = paste(percent(prop, accuracy = .1))),
+            size = 4,
+            show.legend = F,
+            position = position_stack(vjust = .5)) +
+  geom_text(data = f3.2_summary %>% 
+              filter(Q6_RelationshipStatus == "Single"),
+            aes(label = paste(percent(prop, accuracy = .1))),
+            size = 4,
+            show.legend = F,
+            color = "white",
+            position = position_stack(vjust = .5)) +
+  labs(title = "Relationship Status and LDS Mission, Ages 21+",
+       subtitle = paste("n =", nrow(f3.2_data)),
+       fill = "Mission Location",
+       x = "",
+       y = "Proportion") +
+  add_theme +
+  add_y_percent +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.title = element_blank())  +
+  remove_vertical_gridlines
+
+png(filename = "S3/figure3.2.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f3.2)
+
+dev.off()
+
+chix_mission_status <- chisq_test(Q6_RelationshipStatus ~ RM_Sex, x = f3.2_data)
+table(f3.2_data$Q6_RelationshipStatus, f3.2_data$RM_Sex) %>% 
+  summary.table()
+
+f3.2_data %>% 
+  group_by(RM_Sex) %>% 
+  summarise(Count = n())
+
+f3.2_data %>% 
+  group_by(RM_Sex, Q6_RelationshipStatus) %>% 
+  summarise(Count = n())
+# female RM test for marriage
+prop.test(x = c(46, 104), n = c(186, 386))
+#male RM test for marriage
+prop.test(x = c(11, 122), n = c(78, 605))
+
+# female/male test for single
+prop.test(x = c(52 + 385, 110 + 229), n = c(78 + 605, 186 + 386))
+
+
+```
+
+## Figure 3.3
+Highest Mission Position and Kiss Count
+
+```{r}
+
+f3.3_cols <- c(6, 31, 38, 48, 50, 51)
+
+f3.3_data <- survey %>% 
+  filter_na_out(f3.3_cols) %>% 
+  select(all_of(f3.3_cols)) %>% 
+  factor_missionroles()
+
+f3.3_results <- summarySE(data = f3.3_data, 
+                          measurevar = "Q45_KissCount",
+                          groupvars = "Q35_MissionTopAssignment")
+
+f3.3 <- ggplot(f3.3_results, aes(x = Q35_MissionTopAssignment, 
+                         y = Q45_KissCount)) + 
+  geom_col(size = 3, fill = col6) +
+  geom_errorbar(data = f3.3_results %>% 
+                  filter(Q35_MissionTopAssignment != "Office"), 
+                aes(x = Q35_MissionTopAssignment, y = Q45_KissCount,
+                  ymin = ifelse(Q45_KissCount - ci < 0, 0,
+                                  Q45_KissCount - ci), 
+                    # special case for CI interval less than 0
+                    ymax = Q45_KissCount + ci), 
+                width = .1, position = position_dodge(width = .9), show.legend = F) +
+  labs(title = "Highest Mission Assignment and 95% CI Kiss Count",
+       subtitle = paste("n =", nrow(f3.3_data)),
+       caption = "Office assignments were too small of a sample size (n = 21)",
+       y = "Kiss Count",
+       x = "",
+       color = "") +
+  geom_label(mapping = aes(label = format(Q45_KissCount, digits = 3))) +
+  ylim(0, NA) +
+  add_theme +
+  remove_vertical_gridlines
+
+png(filename = "S3/figure3.3.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f3.3)
+
+dev.off()
+
+# insight
+lm_kissrole <- lm(Q45_KissCount ~ Q35_MissionTopAssignment, data = f3.3_data)
+anova(lm_kissrole)
+TukeyHSD(aov(lm_kissrole))
+
+lm_ncmorole <- lm(Q46_NCMOCount ~ Q35_MissionTopAssignment, 
+                  data = f3.3_data)
+anova(lm_ncmorole)
+TukeyHSD(aov(lm_ncmorole))
+
+lm_relationshiprole <- lm(Q47_RelationshipCount ~ Q35_MissionTopAssignment, data = f3.3_data)
+anova(lm_relationshiprole)
+TukeyHSD(aov(lm_relationshiprole))
+
+table(f3.3_data$Q3_Sex, f3.3_data$Q35_MissionTopAssignment)
+
+pairwise.t.test(x = f3.3_data$Q45_KissCount, 
+                  g = f3.3_data$Q35_MissionTopAssignment,
+                  p.adjust.method = 'bonferroni',
+                  alternative = 'two.sided')$p.value
+
+# what about those who are not sister APs?
+
+f3.3_test <- f3.3_data %>% 
+  filter(!(Q35_MissionTopAssignment == "AP" & Q3_Sex == "Female"))
+  
+  
+pairwise.t.test(x = f3.3_test$Q45_KissCount, 
+                  g = f3.3_test$Q35_MissionTopAssignment,
+                  p.adjust.method = 'bonferroni',
+                  alternative = 'two.sided')$p.value
+# does drop p-value but not by enough
+
+
+```
+
+## Figure 3.4 
+Mission Obedience and Relationship Stats
+
+```{r}
+
+f3.4_cols <- c(37, 48, 50, 51)
+
+f3.4_data <- survey %>% 
+  filter_na_out(f3.4_cols) %>% 
+  select(all_of(f3.4_cols))
+
+cor(f3.4_data)
+
+# focus on ncmo and mision obedience
+
+f3.4_results <- f3.4_data %>% 
+  mutate(ObedienceLevel = case_when(
+    Q34_MissionObedienceRating <= 3 ~ "<4",
+    Q34_MissionObedienceRating > 3 & 
+    Q34_MissionObedienceRating <= 5 ~"4-5",
+    Q34_MissionObedienceRating > 5 & 
+    Q34_MissionObedienceRating <= 7 ~ "6-7",
+    Q34_MissionObedienceRating > 7 & 
+    Q34_MissionObedienceRating <= 10 ~ "8-10",
+  )) %>% 
+  mutate(ObedienceLevel = 
+           factor(ObedienceLevel, 
+                  levels = c("<4", "4-5","6-7","8-10"))) %>% 
+  gather(key = "Type", value = "Value", 
+         Q45_KissCount, Q46_NCMOCount) %>% 
+  group_by(ObedienceLevel, Type) %>% 
+  summarise(MEAN = mean(Value),
+            Count = n()) %>% 
+  mutate(Type = ifelse(Type == "Q45_KissCount", "Kiss Count", 
+                       "NCMO Count"))
+
+f3.4 <- ggplot(f3.4_results, aes(x = ObedienceLevel, 
+                         y = MEAN)) + 
+  geom_col(mapping = aes(fill = Type), show.legend = F,
+           color = "black") +
+  labs(title = "Obedience During Mission and Average Overall Kiss/NCMO Count",
+       subtitle = paste("n =", nrow(f3.4_data)),
+       y = "",
+       x = "Obedience Rating",
+       color = "") +
+  facet_wrap( ~ Type,) +
+  geom_text(mapping = aes(label = format(MEAN, digits = 3),
+                          color = ObedienceLevel),
+            color = "white",
+            vjust = 2,
+            size = 3) +
+  scale_fill_manual(values = c(col6, col7)) +
+  scale_color_manual(values = c("black", "white")) +
+  add_theme +
+  remove_gridlines
+
+png(filename = "S3/figure3.4.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f3.4)
+
+dev.off()
+
+# insight
+cor(f3.4_data$Q34_MissionObedienceRating, 
+    f3.4_data$Q46_NCMOCount^.5)
+cor(f3.4_data$Q34_MissionObedienceRating, 
+    f3.4_data$Q45_KissCount^.5)
+
+model <- lm((Q45_KissCount)^(.5) ~ (Q34_MissionObedienceRating),
+                   data = f3.4_data)
+summary(model)
+mean(-0.10481 * 2 * sqrt(f3.4_data$Q45_KissCount))
+
+model <- lm((Q46_NCMOCount)^(.5)~ (Q34_MissionObedienceRating),
+                   data = f3.4_data)
+summary(model)
+mean(-0.10481 * 2 * sqrt(f3.4_data$Q46_NCMOCount))
+
+
+
+
+```
+
+## Figure 3.5 
+Church Activity and Church Doctrine
+
+```{r}
+
+f3.5_cols <- c(16, 33, 34)
+
+f3.5_data <- survey %>% 
+  filter_na_out(f3.5_cols) %>% 
+  select(all_of(f3.5_cols)) %>% 
+  factor_churchstance() %>% 
+  factor_churchactivity()
+
+f3.5_summary <- f3.5_data %>% 
+  group_by(Q30_ChurchActivity, Q31_ChurchSupport) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Proportion = Count/sum(Count),
+         groupCount = sum(Count))
+
+f3.5 <- ggplot(data = f3.5_summary, 
+               mapping = aes(x = Q30_ChurchActivity,
+                             y = Proportion,
+                             fill = Q31_ChurchSupport)) +
+  geom_col(width = .75, color = "black") +
+  geom_text(mapping = aes(label = paste("n =",groupCount)),
+            y = -.04, size = 3) +
+  geom_text(data = f3.5_summary %>% 
+              filter(Proportion > .03 & 
+                       Q30_ChurchActivity != "Inactive"),
+            mapping = aes(label = percent(Proportion, accuracy = .1)),
+            position = position_stack(vjust = .5),
+            size = 3) +
+  geom_text(data = f3.5_summary %>% 
+              filter(Proportion > .03 & 
+                       Q30_ChurchActivity == "Inactive"),
+            mapping = aes(label = percent(Proportion, accuracy = .1)),
+            position = position_stack(vjust = .5), vjust = -.35,
+            size = 3) +
+  scale_y_continuous(labels = scales::percent, 
+                     expand = expansion(mult = c(.1, .1))) +
+  scale_fill_manual(values = color_4_breaks) +
+  labs(title = "Church Attendance and Views of Church Doctrine",
+       x = "Church Activity", 
+       fill = "How much do you support church doctrine?") +
+  add_theme +
+  theme(legend.title = 
+          element_text(face = 'bold', size = 6, hjust = 0.5),  
+        legend.text = element_text(size = 6),      
+        legend.key.size = unit(0.25, "cm"),         
+        legend.spacing.x = unit(0.2, 'cm'),        
+        legend.spacing.y = unit(0.2, 'cm'),
+        legend.direction = "horizontal",  
+        legend.box = "horizontal",
+        axis.title.y = element_blank()) +
+  remove_gridlines
+
+png(filename = "S3/figure3.5.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f3.5)
+
+dev.off()
+
+# insight (math)
+f3.5_test <- f3.5_data %>% 
+  group_by(Q30_ChurchActivity, Q31_ChurchSupport) %>% 
+  summarise(Count = n())
+
+1281 / sum(f3.5_test$Count)
+# 72% of population that 100% supports and active
+
+f3.5_test <- f3.5_data %>% 
+  group_by(Q13_CollegeName, Q30_ChurchActivity, Q31_ChurchSupport) %>% 
+  summarise(Count = n())
+
+f3.5_test[4,'Count'] / sum(f3.5_test[1:10, "Count"])
+
+```
+
+
+## Figure 3.6 
+Mission Obedience and Church Doctrine Stance
+
+```{r}
+
+f3.6_cols <- c(34, 37)
+
+f3.6_data <- survey %>% 
+  filter_na_out(f3.6_cols) %>% 
+  select(all_of(f3.6_cols)) %>% 
+  factor_churchstance() %>% 
+  mutate(ObedienceLevel = case_when(
+    Q34_MissionObedienceRating <= 3 ~ "<4",
+    Q34_MissionObedienceRating > 3 & 
+    Q34_MissionObedienceRating <= 5 ~"4-5",
+    Q34_MissionObedienceRating > 5 & 
+    Q34_MissionObedienceRating <= 7 ~ "6-7",
+    Q34_MissionObedienceRating > 7 & 
+    Q34_MissionObedienceRating <= 10 ~ "8-10",
+  )) %>%  
+  mutate(ObedienceLevel = 
+         factor(ObedienceLevel, 
+                  levels = c("<4", "4-5","6-7","8-10"))) 
+
+f3.6_summary <- f3.6_data %>% 
+  group_by(ObedienceLevel, Q31_ChurchSupport) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Proportion = Count/sum(Count))
+
+f3.6 <- ggplot(data = f3.6_summary,
+       mapping = aes(x = ObedienceLevel, y = Proportion, 
+                     fill = Q31_ChurchSupport)) +
+  geom_col(color = "black", width = .75) +
+  geom_text(data = f3.6_summary %>% 
+              filter(Proportion > .05),
+            mapping = aes(label = percent(Proportion, accuracy = .1)),
+            position = position_stack(vjust = .5),
+            size = 3) +
+  scale_fill_manual(values = color_4_breaks) +
+  labs(title = "Mission Obedience and Church Doctrine",
+       x = "Mission Obedience Level", 
+       fill = "How much do you support church doctrine?") +
+  add_theme +
+  add_y_percents +
+  theme(legend.title = 
+          element_text(face = 'bold', size = 6, hjust = 0.5),  
+        legend.text = element_text(size = 6),      
+        legend.key.size = unit(0.25, "cm"),         
+        legend.spacing.x = unit(0.2, 'cm'),        
+        legend.spacing.y = unit(0.2, 'cm'),
+        legend.direction = "horizontal",  
+        legend.box = "horizontal",
+        axis.title.y = element_blank()) +
+  remove_gridlines
+
+png(filename = "S3/figure3.6.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f3.6)
+
+dev.off()
+
+# insight
+
+lm_docob <- lm(Q34_MissionObedienceRating ~ Q31_ChurchSupport, data = f3.6_data)
+anova(lm_docob)
+TukeyHSD(aov(lm_docob))
+
+t.test(x = f3.6_data$Q34_MissionObedienceRating[f3.6_data$Q31_ChurchSupport == "Strongly Support"],
+       y = f3.6_data$Q34_MissionObedienceRating[f3.6_data$Q31_ChurchSupport != "Strongly Support"])
+
+t.test(x = f3.6_data$Q34_MissionObedienceRating[f3.6_data$Q31_ChurchSupport == "Do not support"],
+       y = f3.6_data$Q34_MissionObedienceRating[f3.6_data$Q31_ChurchSupport != "Do not support"])
+
+```
+
+
+## Figure 3.7
+Mission Role and Church Activity
+
+
+```{r}
+
+f3.7_cols <- c(33, 38)
+
+f3.7_data <- survey %>% 
+  filter_na_out(f3.7_cols) %>% 
+  select(all_of(f3.7_cols)) %>% 
+  mutate(Q30_ChurchActivity = ifelse(Q30_ChurchActivity == "Active", "Active", "Not Active")) %>% 
+  mutate(Q30_ChurchActivity = factor(Q30_ChurchActivity, levels = c("Active", "Not Active")))
+
+f3.7_summary <- f3.7_data %>% 
+  group_by(Q35_MissionTopAssignment, Q30_ChurchActivity) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Proportion = Count/sum(Count)) %>% 
+  filter(Q30_ChurchActivity == "Active") %>% 
+  arrange(desc(Proportion))
+
+f3.7 <- ggplot(f3.7_summary, 
+               aes(x = fct_inorder(Q35_MissionTopAssignment), 
+                         y = Proportion)) + 
+  geom_col(width = .8, fill = col4, color = "black") +
+  labs(title = "Percentages of each Mission Role Still Active in Church",
+       subtitle = paste("n =", nrow(f3.7_data)),
+       x = "") +
+  geom_text(mapping = aes(label = percent(Proportion, accuracy = .1)),
+            vjust = 1.5) +
+  add_theme +
+  add_y_percents +
+  theme(axis.title.y = element_blank()) +
+  remove_gridlines
+
+
+png(filename = "S3/figure3.7.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f3.7)
+
+dev.off()
+
+f3.7_data %>% table() %>% summary.table()
+
+
+```
+
+# Lifestyle
+
+## Table 4.1 
+Social Events and Where Living
+
+```{r}
+
+t4.1_cols <- c(5, 6, 25, 27)
+
+t4.1_data <- survey %>% 
+  filter_na_out(t4.1_cols) %>% 
+  select(all_of(t4.1_cols)) %>% 
+  reset_currentliving() %>% 
+  filter_sex()
+
+table1(~ . | Q22_CurrentLiving,
+       data = t4.1_data, render.continuous = render_t1,
+       overall = F, render = pvalue
+)
+
+# insight (p-value column)
+lm_clse <- lm(Q24_MonthlySocialEvents ~ Q22_CurrentLiving, data = t4.1_data)
+anova(lm_clse)
+lm_agese <- lm(Q24_MonthlySocialEvents ~ Q2_Age, data = t4.1_data)
+anova(lm_agese)
+lm_agecl_to_se <- lm(Q24_MonthlySocialEvents ~ Q22_CurrentLiving * Q2_Age, data = t4.1_data)
+Anova(lm_agecl_to_se)
+```
+
+## Figure 4.1
+Social Events by Age
+
+```{r}
+
+f4.1_cols <- c(5, 6, 9, 25, 27)
+
+f4.1_data <- survey %>% 
+  filter(Q6_RelationshipStatus == "Single") %>% 
+  filter_na_out(f4.1_cols) %>% 
+  select(all_of(f4.1_cols)) %>% 
+  reset_currentliving() %>% 
+  filter_sex() 
+
+
+f4.1_summary <- f4.1_data %>% 
+  mutate(Q2_Age = ifelse(Q2_Age >= 24,"24+", Q2_Age)) %>% 
+  group_by(Q2_Age,  Q3_Sex) %>% 
+  summarise(MeanSocial = mean(Q24_MonthlySocialEvents), Count = n()) %>% 
+  mutate(Prop = Count / sum(Count),
+         GroupMean = sum(MeanSocial * Prop))
+
+f4.1 <- ggplot(f4.1_summary, aes(x = Q2_Age, y = MeanSocial, 
+                         fill = Q3_Sex)) + 
+  geom_col(color = "black", width = .75, 
+           position = position_dodge(width = .75)) +
+  geom_line(mapping = aes(x = Q2_Age, y = GroupMean, group = Q3_Sex)) +
+  geom_point(size = 4.5, show.legend = F,
+    mapping = aes(x = Q2_Age, y = GroupMean, group = Q3_Sex)) +
+  labs(title = "Ages of Young Single Adults and Monthly Social Events",
+       subtitle = paste("n =", nrow(f4.1_data)),
+       y = "Monthly Social Events",
+       x = "Age (Years)",
+       color = "") +
+  scale_fill_manual(values = c(col7, col2)) +
+  scale_y_continuous(n.breaks = 6) +
+  add_theme +
+  theme(legend.title = element_blank()) +
+  remove_vertical_gridlines
+
+png(filename = "S4/figure4.1.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f4.1)
+
+dev.off()
+
+# hist(resid(model))
+# ggplot() +
+#   geom_jitter(mapping = aes(x = resid(model), 
+#                             y = model$fitted))
+
+
+
+  
+cor(f4.1_data$Q2_Age, f4.1_data$Q24_MonthlySocialEvents)
+
+model <- lm(log1p(Q24_MonthlySocialEvents) ~ Q2_Age + Q22_CurrentLiving, data = f4.1_data)
+
+summary(model)
+
+```
+
+## Figure 4.2
+Soda Shop Visits and Kiss Count
+
+```{r}
+
+f4.2_cols <- c(6, 16, 24)
+
+f4.2_data <- survey %>% 
+  filter_na_out(f4.2_cols) %>% 
+  select(all_of(f4.2_cols)) %>% 
+  reset_college() %>% 
+  filter_sex() %>% 
+  filter(Q13_CollegeName != "Other", Q13_CollegeName != "None")
+
+f4.2_summary <- f4.2_data %>% 
+  group_by(Q3_Sex, Q13_CollegeName) %>% 
+  summarise(MeanSoda = mean(Q21_WeeklySodaShopVisits), Count = n()) 
+
+f4.2 <- ggplot(data = f4.2_summary, 
+       mapping = aes(y = MeanSoda, fill = Q13_CollegeName, 
+                     x = Q3_Sex)) +
+  geom_col(position = 'dodge', color = 'black', width = .7) + 
+  geom_text(mapping = aes(label = format(MeanSoda, digits = 2)),
+            position = position_dodge(width = .7),
+            vjust = 1.5, size = 5,
+            color = "white") +
+  geom_text(mapping = aes(label = c("N = 750:133", "N = 750:133", 
+                                    "N = 650:132", "N = 650:132")),
+            y = -.03, size = 3) +
+  ylim(-.025, NA) +
+  scale_fill_manual(values = c(col2, coluvu)) +
+  labs(title = "Sodalicious/Swig Visits by College",
+       subtitle = paste("n = ", nrow(f4.2_data)),
+       y = "Average Weekly Soda Shop Visits",
+       fill = "College") +
+  add_theme +
+  theme(axis.title.x = element_blank()) +
+  remove_gridlines
+
+png(filename = "S4/figure4.2.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f4.2)
+
+dev.off()
+
+# insight
+f4.2_summary
+
+# male/female ratio
+f4.2_data %>% 
+  t_test(Q21_WeeklySodaShopVisits ~ Q3_Sex,
+         order = c("Female", "Male"))
+
+# BYU/UVU ratio
+f4.2_data %>% 
+  t_test(Q21_WeeklySodaShopVisits ~ Q13_CollegeName,
+         order = c("BYU", "UVU"))
+
+# female UVU to BYU ratio
+f4.2_data %>% 
+  filter(Q3_Sex == "Female") %>% 
+  t_test(Q21_WeeklySodaShopVisits ~ Q13_CollegeName,
+         order = c("BYU", "UVU"))
+
+# male UVU to BYU ratio
+f4.2_data %>% 
+  filter(Q3_Sex == "Male") %>% 
+  t_test(Q21_WeeklySodaShopVisits ~ Q13_CollegeName,
+         order = c("BYU", "UVU"))
+
+```
+
+## Figure 4.3 
+Weekly Workouts
+
+```{r}
+
+f4.3_cols <- c(6, 16, 26)
+
+f4.3_data <- survey %>% 
+  filter_na_out(f4.3_cols) %>% 
+  select(all_of(f4.3_cols)) %>% 
+  filter_sex() %>% 
+  reset_college() %>% 
+  filter(Q13_CollegeName == "BYU" | Q13_CollegeName == "UVU")
+
+f4.3_summary <- f4.3_data %>% 
+  group_by(Q3_Sex, Q13_CollegeName) %>% 
+  summarise(MeanWO = mean(Q23_WeeklyWorkouts), Count = n())
+
+f4.3 <- ggplot(data = f4.3_summary, 
+       mapping = aes(y = MeanWO, fill = Q13_CollegeName, 
+                     x = Q3_Sex)) +
+  geom_col(position = 'dodge', color = 'black', width = .7) + 
+  geom_text(mapping = aes(label = format(MeanWO, digits = 2)),
+            position = position_dodge(width = .7),
+            vjust = 1.5, size = 5,
+            color = "white") +
+  geom_text(mapping = aes(label = c("N = 702:123", "N = 702:123", 
+                                    "N = 605:121", "N = 605:121")),
+            y = -.11, size = 3) +
+  ylim(-.125, NA) +
+  scale_fill_manual(values = c(col2, coluvu)) +
+  labs(title = "Weekly Workouts by College",
+       subtitle = paste("n = ", nrow(f4.3_data)),
+       y = "Average Workouts per Week",
+       fill = "College") +
+  add_theme +
+  theme(axis.title.x = element_blank()) +
+  remove_gridlines
+
+png(filename = "S4/figure4.3.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f4.3)
+
+dev.off()
+
+
+# male/female ratio
+f4.3_data %>% 
+  t_test(Q23_WeeklyWorkouts ~ Q3_Sex,
+         order = c("Female", "Male"))
+
+# BYU/UVU ratio
+f4.3_data %>% 
+  t_test(Q23_WeeklyWorkouts ~ Q13_CollegeName,
+         order = c("BYU", "UVU"))
+
+# female UVU to BYU ratio
+f4.3_data %>% 
+  filter(Q3_Sex == "Female") %>% 
+  t_test(Q23_WeeklyWorkouts ~ Q13_CollegeName,
+         order = c("BYU", "UVU"))
+
+# male UVU to BYU ratio
+f4.3_data %>% 
+  filter(Q3_Sex == "Male") %>% 
+  t_test(Q23_WeeklyWorkouts ~ Q13_CollegeName,
+         order = c("BYU", "UVU"))
+
+```
+
+## Figure 4.4 
+Summer Sales and Kiss Count
+
+```{r}
+
+f4.4_cols <- c(23, 31, 48, 50, 51)
+
+f4.4_nrow <- survey %>% 
+  filter_na_out(f4.4_cols) %>% 
+  select(all_of(f4.4_cols)) 
+
+f4.4_data <- f4.4_nrow %>% 
+  gather(key = "Key", value = "Value",
+         which(sapply(., is.numeric)))  %>% 
+  mutate(Key = case_when(
+    Key == "Q28_MonthlyDates" ~ "Monthly Dates",
+    Key == "Q45_KissCount" ~ "Kiss Count",
+    Key == "Q46_NCMOCount" ~ "NCMO Count",
+    Key == "Q47_RelationshipCount" ~ "Relationship Count"
+  )) %>% 
+  rename(SummerSales = Q20_SummerSales) 
+
+f4.4_results <- f4.4_data %>% 
+  group_by(SummerSales, Key) %>% 
+  summarise(Value = mean(Value)) %>% 
+  arrange(desc(Value))
+
+
+f4.4 <- ggplot(f4.4_results, aes(x = fct_inorder(Key), y = Value, 
+                                 fill = SummerSales)) + 
+  geom_col(position = 'dodge', color = "black", width = .75) +
+  labs(title = "Summer Sales and Various Dating Metrics",
+       subtitle = paste("n =", nrow(f4.4_nrow)),
+       y = "Average",
+       x = "",
+       fill = "Have you done sales for at least one summer?") +
+  geom_text(mapping = aes(label = format(Value, digits = 3),
+                          color = SummerSales),
+            position = position_dodge(width = .73),
+            show.legend = F,
+            vjust = 2,
+            size = 3) +
+  ylim(0, NA) +
+  scale_fill_manual(values = c(col5, col2)) +
+  scale_color_manual(values = c("black", "white")) +
+  add_theme + 
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  remove_gridlines
+
+png(filename = "S4/figure4.4.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f4.4)
+
+dev.off()
+
+t.test(x = f4.4_data$Value[f4.4_data$Key == "Monthly Dates" & f4.4_data$SummerSales == "Yes"],
+       y = f4.4_data$Value[f4.4_data$Key == "Monthly Dates" & f4.4_data$SummerSales == "No"])
+
+t.test(x = f4.4_data$Value[f4.4_data$Key == "Kiss Count" & f4.4_data$SummerSales == "Yes"],
+       y = f4.4_data$Value[f4.4_data$Key == "Kiss Count" & f4.4_data$SummerSales == "No"])
+
+t.test(x = f4.4_data$Value[f4.4_data$Key == "NCMO Count" & f4.4_data$SummerSales == "Yes"],
+       y = f4.4_data$Value[f4.4_data$Key == "NCMO Count" & f4.4_data$SummerSales == "No"])
+
+t.test(x = f4.4_data$Value[f4.4_data$Key == "Relationship Count" & f4.4_data$SummerSales == "Yes"],
+       y = f4.4_data$Value[f4.4_data$Key == "Relationship Count" & f4.4_data$SummerSales == "No"])
+
+sum(f4.4_nrow$Q20_SummerSales == "Yes") / 
+  nrow(f4.4_nrow)
+
+
+```
+
+## Figure 4.5 
+Parent Income
+
+```{r}
+
+f4.5_cols <- c(21)
+
+f4.5_data <- survey %>% 
+  filter_na_out(f4.5_cols) %>% 
+  select(Q18_ParentIncome) %>% 
+  factor_income()
+
+f4.5_data %>% 
+  group_by(Q18_ParentIncome) %>% 
+  summarise(Count = n())
+
+f4.5_summary <- f4.5_data %>% 
+  group_by(Q18_ParentIncome) %>% 
+  summarise(Count = n()) %>% 
+  mutate(prop = Count/sum(Count)) %>% 
+  ungroup() %>% 
+  mutate(ypos = 
+           c(.995, .9825, .9725, .9575, .9375, .915, .885, .845, .785, .71, .52, .2))
+
+my_pal = colorRampPalette(c(col3, col7, col2))(12)
+
+f4.5 <- ggplot(f4.5_summary, 
+               aes(x="", y=prop, fill=Q18_ParentIncome)) +
+  coord_polar("y", start=0) +
+  geom_bar(stat="identity", width=1, color="white") +
+  geom_text(data = f4.5_summary %>% filter(prop > .03),
+    mapping = aes(y = ypos, 
+                  label = percent(prop, accuracy = .1)),
+            color = "white", nudge_x = .25) +
+  geom_text_repel(data = f4.5_summary %>% filter(prop < .03), 
+                  mapping = aes(y = ypos, 
+                  label = percent(prop, accuracy = .1)),
+            color = "black", hjust = 1, vjust = -5.75,
+            force = 5, size = 3, nudge_x = .375, seed = 11) +
+  theme_void() +
+  labs(title = "    Survey Sample and Parent's Annual Salary") +
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        legend.title = element_blank()) +
+  scale_fill_manual(values = my_pal)
+
+f4.5
+
+png(filename = "S4/figure4.5.png", width = 6, height = 4.5, units = "in", res = 540)
+
+print(f4.5)
+
+dev.off()
+
+
+
+```
+
+
+## Figure 4.6 
+Parent Income and Car Owner
+
+```{r}
+
+f4.6_cols <- c(21, 30)
+
+f4.6_data <- survey %>% 
+  filter_na_out(f4.6_cols) %>% 
+  select(all_of(f4.6_cols)) %>% 
+  factor_income() 
+
+f4.6_summary <- f4.6_data %>% 
+  group_by(Q18_ParentIncome, Q27_CarOwner) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Proportion = Count / sum(Count))
+
+f4.6 <- ggplot(data = f4.6_summary %>% filter(Q27_CarOwner == "Yes"),
+               mapping = aes(x = Q18_ParentIncome,
+                             y = Proportion,
+                             fill = Q27_CarOwner)) +
+        geom_col(width = .75, color = "black", fill = col4) +
+        geom_smooth(data = f4.6_summary %>% 
+                      filter(Q27_CarOwner == "Yes"),
+                    mapping = aes(x = Q18_ParentIncome,
+                                  y = Proportion,
+                                  group = Q27_CarOwner),
+                    method = "loess", span = 2, se = F,
+                    color = "black", show.legend = F) +
+       geom_text(mapping = aes(label = 
+                                 percent(Proportion, accuracy = .1)),
+                        position = 'stack', vjust = 2.5, 
+                 size = 2.5,
+                 show.legend = F) +
+  scale_color_manual(values = c("black", "white")) +
+  labs(title = "Car Ownership to Parent Income",
+       subtitle = paste("n =", nrow(f4.6_data)),
+       x = "Parent Income", y = "",
+       fill = "Do you own a car?") +
+  add_theme +
+  add_tilt +
+  add_y_percents +
+  remove_gridlines
+
+png(filename = "S4/figure4.6.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f4.6)
+
+dev.off()
+
+
+# insight
+
+f4.6_test <- f4.6_data %>% 
+  mutate(Income = as.numeric(Q18_ParentIncome),
+         Car = ifelse(Q27_CarOwner == "Yes", 1, 0)) %>% 
+  select(3:4)
+
+lm_carincome <- glm(Car ~ Income, data = f4.6_test, family = "binomial")
+summary(lm_carincome)
+calc_prob(int = 0.53367, coef = 0.06334)
+
+
+cor(f4.6_test$Income, f4.6_test$Car)
+
+```
+
+## Figure 4.7 
+Monthly Dates to Car Owner
+
+```{r}
+
+f4.7_cols <- c(5, 6, 30, 31)
+
+f4.7_data <- survey %>% 
+  filter(Q6_RelationshipStatus  == "Single") %>% 
+  filter_na_out(f4.7_cols) %>% 
+  select(all_of(f4.7_cols)) %>% 
+  filter_sex() %>% 
+  mutate(Q2_Age = ifelse(Q2_Age >= 21, "21+", "<21"))
+
+f4.7_results <- summarySE(data = f4.7_data, conf.interval = .95,
+                          measurevar = "Q28_MonthlyDates",
+                          groupvars = c("Q27_CarOwner", "Q2_Age", "Q3_Sex"))
+
+pd <- position_dodge(0.25)
+
+f4.7 <- ggplot(f4.7_results, aes(x = Q2_Age, y = Q28_MonthlyDates, 
+                         color = Q27_CarOwner, group = interaction(Q27_CarOwner, Q3_Sex))) + 
+  geom_errorbar(aes(ymin = Q28_MonthlyDates - ci, 
+                    ymax = Q28_MonthlyDates + ci), 
+                width = .1, position = pd, show.legend = F) +
+  geom_line(position = pd, size = 1, show.legend = F) +
+  geom_point(position = pd, size = 3) +
+  facet_wrap(~ Q3_Sex, scales = 'free_x') +
+  labs(title = "Car Ownership and 95% CI on Monthly Dates",
+       subtitle = paste("n =", nrow(f4.7_data), sep = " *"),
+       caption = "*sample filtered to only include single people",
+       y = "AVG Monthly Dates",
+       x = "Age (Years)",
+       color = "Do you own a car?") +
+  scale_color_manual(values = c(col7, col2)) +
+  add_theme +
+  remove_gridlines
+
+
+png(filename = "S4/figure4.7.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f4.7)
+
+dev.off()
+
+# insight
+
+f4.7_g1 <- f4.7_data %>% 
+  filter(Q3_Sex == "Female", Q2_Age == "<21")
+
+t.test(f4.7_g1$Q28_MonthlyDates[f4.7_g1$Q27_CarOwner == "Yes"],
+       f4.7_g1$Q28_MonthlyDates[f4.7_g1$Q27_CarOwner == "No"])
+
+f4.7_g2 <- f4.7_data %>% 
+  filter(Q3_Sex == "Male", Q2_Age == "21+")
+
+t.test(f4.7_g2$Q28_MonthlyDates[f4.7_g2$Q27_CarOwner == "Yes"],
+       f4.7_g2$Q28_MonthlyDates[f4.7_g2$Q27_CarOwner == "No"])
+
+f4.7_g3 <- f4.7_data %>% 
+  filter(Q3_Sex == "Male", Q2_Age == "<21")
+
+t.test(f4.7_g3$Q28_MonthlyDates[f4.7_g3$Q27_CarOwner == "Yes"],
+       f4.7_g3$Q28_MonthlyDates[f4.7_g3$Q27_CarOwner == "No"])
+
+f4.7_g4 <- f4.7_data %>% 
+  filter(Q3_Sex == "Female", Q2_Age == "21+")
+
+t.test(f4.7_g4$Q28_MonthlyDates[f4.7_g4$Q27_CarOwner == "Yes"],
+       f4.7_g4$Q28_MonthlyDates[f4.7_g4$Q27_CarOwner == "No"])
+
+
+```
+
+## Figure 4.8
+Working Hours related to Parent Income
+
+```{r}
+
+f4.8_cols <- c(21, 22)
+
+f4.8_data <- survey %>% 
+  filter(Q12_CollegeEducation == "Yes") %>% 
+  filter_na_out(f4.8_cols) %>% 
+  select(all_of(f4.8_cols)) %>% 
+  factor_income() %>% 
+  mutate(MinimalWorkingHours = ifelse(Q19_WeeklyWorkHours <= 0, TRUE, FALSE)) 
+
+f4.8_summary <- f4.8_data %>% 
+  group_by(Q18_ParentIncome) %>% 
+  summarise(
+    MeanWO = mean(Q19_WeeklyWorkHours),
+    Count = n(),
+    Sustained_by_Parent_Income = sum(MinimalWorkingHours)
+  ) %>% 
+  mutate(Prop_Sustained = 100*(Sustained_by_Parent_Income / Count)) %>% 
+  ungroup() %>% 
+  gather(key = "Type", value = "Value", 
+         MeanWO, Prop_Sustained) %>% 
+  select(Q18_ParentIncome, Type, Value) %>% 
+  mutate(Type2 = ifelse(Type == "MeanWO", "Mean WO", "Prop")) %>% 
+  mutate(Value_Print = ifelse(Type == "MeanWO", format(Value, digits = 3),
+                              percent(Value/100, accuracy = 1))) %>% 
+  mutate(Type = ifelse(Type == "MeanWO", "Average Weekly Work Hours",
+                        "% Jobless")) %>% 
+  mutate(Type = factor(Type, levels = c("Average Weekly Work Hours",
+                                        "% Jobless"))) %>% 
+  filter(!(Q18_ParentIncome %in% c("Less than $10,000", "$10,000 - $19,999")))
+
+f4.8_coef = 100
+
+f4.8 <- ggplot(data = f4.8_summary, aes(x = Q18_ParentIncome, y = Value, 
+                                fill = Type, group = Type)) +
+  geom_col(color = "black", position = 'dodge') +
+  geom_smooth(method = 'loess', se = F, span = 2, show.legend = F,
+              linewidth = .5, mapping = aes(color = Type2)) +
+  geom_text(mapping = aes(label = Value_Print, color = Type),
+            position = position_dodge(width = .9),
+            vjust = 1.5, show.legend = F, size = 2) +
+  scale_y_continuous(
+    name = "Working Hours",
+    sec.axis = sec_axis(~ . / f4.8_coef, labels = scales::percent,
+                        name = "% Jobless",
+                        )) +
+  labs(x = "Parent Income",
+       title = "College Students and Working Hours",
+       subtitle = paste("n =", nrow(f4.8_data))) +
+  scale_fill_manual(values = c(col5, col6)) +
+  scale_color_manual(values = c("Average Weekly Work Hours" = "black", 
+                                "% Jobless" = "white", 
+                                "Mean WO" = col7, 
+                                "Prop" = col2)) +
+  add_theme +
+  add_tilt +
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 6)) +
+  remove_vertical_gridlines
+
+
+png(filename = "S4/figure4.8.png", width = 7, height = 4, units = "in", res = 540)
+
+print(f4.8)
+
+dev.off()
+
+# insight 
+
+# jobless
+
+f4.8_test <- f4.8_data %>% 
+  mutate(Q18_ParentIncome = as.numeric(Q18_ParentIncome))
+
+lm_jobless <- glm(MinimalWorkingHours ~ (Q18_ParentIncome), data = f4.8_test, family = "binomial")
+summary(lm_jobless)
+calc_prob(int = -2.77592, coef = 0.1285)
+
+
+cor(f4.8_test$Q18_ParentIncome, f4.8_test$MinimalWorkingHours)
+
+lm_workhours <- lm(Q19_WeeklyWorkHours ~ Q18_ParentIncome, 
+                   data = f4.8_test)
+summary(lm_workhours)
+
+cor(f4.8_test$Q18_ParentIncome, f4.8_test$Q19_WeeklyWorkHours)
+
+```
+
+## Figure 4.9 
+Working Hours comparing Colleges
+
+```{r}
+
+f4.9_cols <- c(6, 16, 22)
+
+f4.9_data <- survey %>% 
+  filter_na_out(f4.9_cols) %>% 
+  select(all_of(f4.9_cols)) %>% 
+  filter_sex() %>%
+  reset_college() %>% 
+  filter(Q13_CollegeName != "Other")
+
+f4.9_boxplot <- f4.9_data %>% 
+  group_by(Q13_CollegeName) %>% 
+  summarise(Median = mean(Q19_WeeklyWorkHours),
+            Q1 = quantile(Q19_WeeklyWorkHours, .25),
+            Q3 = quantile(Q19_WeeklyWorkHours, .75)) %>% 
+  mutate(IQR = Q3-Q1, LB = Q1 - 1.5*IQR, UB = Q3 + 1.5*IQR)
+
+f4.9_outliers <- c()
+wwh <- f4.9_data$Q19_WeeklyWorkHours
+college <- f4.9_data$Q13_CollegeName
+b <- data.frame('LB' = f4.9_boxplot$LB, 'UB' = f4.9_boxplot$UB)
+
+for (i in 1:length(wwh)) {
+  
+  if (college[i] == "BYU") {
+    if (wwh[i] >= b$LB[1] & wwh[i] <= b$UB[1]) {
+      f4.9_outliers <- append(f4.9_outliers, "No")
+    }
+    else { 
+      f4.9_outliers <- append(f4.9_outliers, "Yes")
+    }
+  }
+  
+  if (college[i] == "UVU") {
+    if (wwh[i] >= b$LB[2] & wwh[i] <= b$UB[2]) {
+      f4.9_outliers <- append(f4.9_outliers, "No")
+    }
+    else { 
+      f4.9_outliers <- append(f4.9_outliers, "Yes")
+    }
+  }
+  
+  
+  if (college[i] == "None") {
+    if (wwh[i] >= b$LB[3] & wwh[i] <= b$UB[3]) {
+      f4.9_outliers <- append(f4.9_outliers, "No")
+    }
+    else { 
+      f4.9_outliers <- append(f4.9_outliers, "Yes")
+    }
+  }
+}
+
+f4.9_outliers <- data.frame('outlier' = f4.9_outliers,
+                            'Q13_CollegeName' = college,
+                            'Q19_WeeklyWorkHours' = wwh)
+
+f4.9 <- ggplot(data = f4.9_data, 
+       mapping = aes(y = Q19_WeeklyWorkHours,
+                     x = Q13_CollegeName, fill = Q13_CollegeName)) +
+  geom_boxplot(outlier.shape = NA, alpha = .75, show.legend = F,
+               staplewidth = .05) +
+  geom_jitter(data = f4.9_outliers %>% 
+                filter(outlier == "Yes"),
+              mapping = aes(x = Q13_CollegeName, y = Q19_WeeklyWorkHours),
+              width = .05, height = 0, shape = 1, show.legend = F) +
+  scale_fill_manual(values = c(col2, coluvu, col3)) +
+  labs(title = "Weekly Work Hours by College",
+       subtitle = paste("n =", nrow(f4.9_data)),
+       y = "Working Hours",
+       x = "College") +
+  add_theme
+
+
+png(filename = "S4/figure4.9.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f4.9)
+
+dev.off()
+
+# insight
+
+lm_collegewh <- lm(Q19_WeeklyWorkHours ~ Q13_CollegeName, data = f4.9_data)
+anova(lm_collegewh)
+TukeyHSD(aov(lm_collegewh))
+
+pairwise.t.test(x = f4.9_data$Q19_WeeklyWorkHours, 
+                  g = f4.9_data$Q13_CollegeName,
+                  p.adjust.method = 'bonferroni',
+                  alternative = 'two.sided')$p.value
+
+```
+
+
+## Table 4.2
+Work related to GPA 
+
+```{r}
+
+t4.2_cols <- c(16, 17, 22)
+
+t4.2_data <- survey %>% 
+  filter_na_out(t4.2_cols) %>% 
+  select(all_of(t4.2_cols)) %>% 
+  reset_college() %>% 
+  filter(!(Q13_CollegeName %in% c("None", "Other"))) %>% 
+  group_GPA()
+
+t4.2_summary <- summarySE(data = t4.2_data, 
+                           measurevar = "Q19_WeeklyWorkHours",
+                           groupvars = c("GPA_letter", "Q13_CollegeName")) %>% 
+  mutate_if(is.numeric, ~ round(., digits = 2)) %>% 
+  mutate(ci95 = paste("(", Q19_WeeklyWorkHours + ci, ", ", Q19_WeeklyWorkHours - ci, ")", sep = "")) %>% 
+  select(1:4, 5, 8)
+
+cor(t4.2_data$Q14_CollegeGPA, t4.2_data$Q19_WeeklyWorkHours)
+
+t4.2_data %>% 
+  group_by(Q13_CollegeName) %>% 
+  summarise(Count = n())
+
+kable(x = t4.2_summary)
+
+
+```
+
+# Politics
+
+## Figure 5.1 
+Gender and Politics
+
+```{r}
+
+f5.1_cols <- c(6, 29)
+
+f5.1_data <- survey %>% 
+  filter_na_out(f5.1_cols) %>% 
+  select(all_of(f5.1_cols)) %>% 
+  factor_politics() %>% 
+  filter_sex()
+
+f5.1_summary <- f5.1_data %>% 
+  group_by(Q3_Sex, Q26_PoliticalPhilosophy) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count/sum(Count)) %>% 
+  mutate(Prop = ifelse(Q3_Sex == "Female", -Prop, Prop))
+
+
+f5.1 <- ggplot(data = f5.1_summary,
+       mapping = aes(x = Prop, fill = Q3_Sex,
+                     y = Q26_PoliticalPhilosophy)) +
+  geom_col(color = "black") +
+  geom_vline(xintercept = 0, color = "black", linewidth = .75) +
+  geom_text(data = f5.1_summary %>% 
+              filter(Q3_Sex == "Male",
+                     Q26_PoliticalPhilosophy != "Very liberal"),
+            color = "white",
+            mapping = aes(label = percent(Prop, accuracy = .1)),
+            hjust = 1.25, size = 3) +
+  geom_text(data = f5.1_summary %>% 
+              filter(Q3_Sex == "Female",
+                     Q26_PoliticalPhilosophy != "Very liberal",
+                     Q26_PoliticalPhilosophy != "Very conservative"),
+            color = "white",
+            mapping = aes(label = percent(-Prop, accuracy = .1)),
+            hjust = -.25, size = 3) +
+  geom_text(data = f5.1_summary %>% 
+              filter(Q3_Sex == "Male",
+                     Q26_PoliticalPhilosophy == "Very liberal"),
+            color = "black",
+            mapping = aes(label = percent(Prop, accuracy = .1)),
+            hjust = -.25, size = 3) +
+  geom_text(data = f5.1_summary %>%
+              filter(Q3_Sex == "Female",
+                     Q26_PoliticalPhilosophy == "Very liberal" |
+                     Q26_PoliticalPhilosophy == "Very conservative"),
+            color = "black",
+            mapping = aes(label = percent(-Prop, accuracy = .1)),
+            hjust = 1.25, size = 3) +
+  theme_minimal() + 
+  remove_gridlines +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.length.y = unit(.01, units = 'in'),
+        plot.background = element_blank(),
+        axis.line = element_line(color='black'),
+        panel.border = element_blank(),
+        legend.position = 'bottom',
+        legend.title = element_blank(),
+        text = element_text(family = "Arial", size = 10), 
+        plot.title = element_text(size = 12, face = "bold")) +
+  scale_fill_manual(values = c(col7, col2)) +
+  labs(title = "Political Leaning and Gender",
+       subtitle = paste("n = ", nrow(f5.1_data)))
+
+
+png(filename = "S5/figure5.1.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f5.1)
+
+dev.off()
+
+# insight
+
+f5.1_data %>% table() %>% summary.table()
+
+```
+
+
+## Figure 5.2
+Gender and college
+
+```{r}
+
+f5.2_cols <- c(16, 29)
+
+f5.2_data <- survey %>% 
+  filter_na_out(f5.2_cols) %>% 
+  select(all_of(f5.2_cols)) %>% 
+  factor_politics() %>% 
+  reset_college() 
+
+f5.2_summary <- f5.2_data %>% 
+  group_by(Q13_CollegeName, Q26_PoliticalPhilosophy) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count/sum(Count))  %>% 
+  filter(Q13_CollegeName != "Other") 
+
+
+f5.2 <- ggplot(data = f5.2_summary,
+       mapping = aes(y = Prop, fill = Q13_CollegeName,
+                     x = Q26_PoliticalPhilosophy)) +
+  geom_col(color = "black", alpha = .75, show.legend = F) +
+  geom_text(mapping = aes(label = percent(Prop, accuracy = 1)),
+            vjust = 1.5, size = 2.5) +
+  facet_wrap(~ Q13_CollegeName) +
+  scale_fill_manual(values = c(col2, coluvu, col3)) +
+  labs(title = "Political Leaning and College",
+      subtitle = paste("n = ", nrow(f5.2_data))) +
+  add_theme +
+  add_tilt +
+  add_y_percent +
+  remove_gridlines +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+
+
+
+png(filename = "S5/figure5.2.png", width = 7, height = 4, units = "in", res = 540)
+
+print(f5.2)
+
+dev.off()
+
+# insight
+
+f5.2_data %>% 
+  filter(Q13_CollegeName != "None", Q13_CollegeName != "Other") %>% 
+  mutate(Q13_CollegeName = as.character(Q13_CollegeName)) %>% 
+  table() %>% summary.table()
+
+# how left/right is BYU or UVU?
+f5.2_test <- f5.2_data %>% 
+  mutate(Politics_Level = as.numeric(Q26_PoliticalPhilosophy)) 
+
+f5.2_test %>% 
+  group_by(Q13_CollegeName) %>% 
+  summarise(Mean_Politic_Level = mean(Politics_Level))
+
+t.test(f5.2_test$Politics_Level[f5.2_test$Q13_CollegeName == "BYU"],
+       f5.2_test$Politics_Level[f5.2_test$Q13_CollegeName == "UVU"]
+       )
+
+
+
+```
+
+## Figure 5.3 
+Politics and Age
+
+```{r}
+
+f5.3_cols <- c(29, 5)
+
+f5.3_data <- survey %>% 
+  filter_na_out(f5.3_cols) %>% 
+  select(all_of(f5.3_cols)) %>% 
+  factor_simplify_politics()
+
+f5.3_summary <- f5.3_data %>% 
+  mutate(Q2_Age = ifelse(Q2_Age >= 27, "27+", Q2_Age)) %>% 
+  group_by(Q2_Age, Q26_PoliticalPhilosophy) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count)) 
+
+f5.3 <- ggplot(data = f5.3_summary, mapping = aes(x = Q2_Age,
+                                          y = Prop,
+                                          group = Q26_PoliticalPhilosophy,
+                                          color = Q26_PoliticalPhilosophy)) +
+  geom_smooth(span = .4, se = F, method = "loess") +
+  scale_color_manual(values = color_politics_simple) +
+  geom_point(data = f5.3_summary %>% 
+               filter(Q2_Age == "18" | Q2_Age == "27+"),
+               size = 3, show.legend = F) +
+  geom_label(data = f5.3_summary %>% 
+               filter(Q2_Age == "18" | Q2_Age == "27+"),
+             mapping = aes(label = percent(Prop, accuracy = 1)),
+             vjust = -.5, show.legend = F, size = 3) +
+  labs(title = "Political Leaning and Age",
+       subtitle = paste("n = ", nrow(f5.3_data)),
+       x = "Age (Years)") +
+  add_theme +
+  add_y_percent +
+  remove_vertical_gridlines +
+  theme(axis.title.y = element_blank(),
+        legend.title = element_blank())
+
+
+
+png(filename = "S5/figure5.3.png", width = 8, height = 4, units = "in", res = 540)
+
+print(f5.3)
+
+dev.off()
+
+f5.3_data %>% table()
+
+
+
+```
+
+## Figure 5.4
+
+Politics and Church Stance
+
+```{r}
+
+f5.4_cols <- c(29, 33)
+
+f5.4_data <- survey %>% 
+  filter_na_out(f5.4_cols) %>% 
+  select(all_of(f5.4_cols)) %>% 
+  factor_simplify_politics() %>% 
+  factor_churchactivity() 
+
+f5.4_summary <- f5.4_data %>% 
+  group_by(Q30_ChurchActivity, Q26_PoliticalPhilosophy) %>%
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count/sum(Count)) %>%
+  mutate(Prop = ifelse(Q26_PoliticalPhilosophy == "Democrat", -Prop, Prop))
+
+f5.4 <- ggplot(data = f5.4_summary,
+               mapping = aes(x = Prop, y = fct_rev(Q30_ChurchActivity), 
+                             fill = fct_rev(Q26_PoliticalPhilosophy))) +
+  geom_col(color = "black", width = .5) +
+  geom_text(mapping = aes(label = percent(abs(Prop), accuracy = .1)),
+            color = "white", position = position_stack(vjust = .5),
+            size = 3) +
+  scale_fill_manual(values = color_politics_simple,
+                    breaks = c("Democrat", "Moderate", "Republican")) +
+  labs(title = "Political Leaning and Church Activity",
+       subtitle = paste("n =", nrow(f5.4_data)),
+       y = "Church Activity") +
+  add_theme +
+  remove_gridlines +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        plot.background = element_blank(),
+        axis.line = element_line(color='black'),
+        panel.border = element_blank(),
+        legend.title = element_blank())
+
+png(filename = "S5/figure5.4.png", width = 7, height = 4, units = "in", res = 540)
+
+print(f5.4)
+
+dev.off()
+
+
+```
+
+
+## Figure 5.5
+Politics and Mission Obedience
+
+```{r}
+
+f5.5_cols <- c(6, 29, 23)
+
+f5.5_data <- survey %>% 
+  filter_na_out(f5.5_cols) %>% 
+  select(all_of(f5.5_cols)) %>% 
+  factor_politics() %>% 
+  filter(Q3_Sex == "Male") 
+
+f5.5_summary <- f5.5_data %>% 
+  group_by(Q20_SummerSales, Q26_PoliticalPhilosophy) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  mutate(Very = ifelse(str_detect(Q26_PoliticalPhilosophy, "Very"), T, F))
+
+f5.5 <- ggplot(data = f5.5_summary, 
+       mapping = aes(fill = fct_rev(Q26_PoliticalPhilosophy),
+                     x = Prop, y = Q20_SummerSales,
+                     group = fct_rev(Q26_PoliticalPhilosophy))) +
+  geom_col(color = "black", width = .75) + 
+  geom_text(data = f5.5_summary %>% 
+              filter(Q26_PoliticalPhilosophy != "Very liberal" &
+                       Q20_SummerSales == "Yes"),
+            mapping = aes(label = percent(Prop, accuracy = 1),
+                          color = Very), show.legend = F,
+            position = position_stack(vjust = .5), size = 2.5,
+            hjust = -.01) +
+  geom_text(data = f5.5_summary %>% 
+              filter(Q20_SummerSales == "No"),
+            mapping = aes(label = percent(Prop, accuracy = 1),
+                          color = Very), show.legend = F,
+            position = position_stack(vjust = .5), size = 2.5) +
+  scale_color_manual(values = c("black", "white")) +
+  scale_fill_manual(values = politics_colors,
+                    breaks = c("Very liberal", "Liberal", "Centrist",
+                               "Conservative", "Very conservative")) +
+  labs(title = "Political Leaning and Summer Sales",
+       y = "Did you participate in summer sales?",
+       subtitle = paste("n = *", nrow(f5.5_data), sep = ""),
+       caption = "*males only") +
+  add_theme +
+  add_x_percent +
+  remove_gridlines +
+  theme(axis.title.x = element_blank(),
+        legend.title = element_blank()) 
+
+png(filename = "S5/figure5.5.png", width = 7, height = 4, units = "in", res = 540)
+
+print(f5.5)
+
+dev.off()
+
+# insight
+
+f5.5_data %>% select(-Q3_Sex) %>% table() %>% summary.table()
+
+
+```
+
+## Figure 5.6
+Politics and Dating Metrics
+
+```{r}
+
+f5.6_cols <- c(29, 31, 48, 50, 51)
+
+f5.6_nrow <- survey %>% 
+  filter_na_out(f5.6_cols) %>% 
+  select(all_of(f5.6_cols)) %>% 
+  factor_politics()
+
+f5.6_data <- f5.6_nrow %>% 
+  gather(key = "Key", value = "Value",
+         which(sapply(., is.numeric)))  %>% 
+  mutate(Key = case_when(
+    Key == "Q28_MonthlyDates" ~ "Monthly Dates",
+    Key == "Q45_KissCount" ~ "Kiss Count",
+    Key == "Q46_NCMOCount" ~ "NCMO Count",
+    Key == "Q47_RelationshipCount" ~ "Relationship Count"
+  )) %>% 
+  rename(Politics = Q26_PoliticalPhilosophy) 
+
+f5.6_summary <- f5.6_data %>% 
+  group_by(Politics, Key) %>% 
+  summarise(Value = mean(Value)) %>% 
+  arrange(desc(Value)) 
+  
+
+f5.6 <- ggplot(f5.6_summary, 
+               aes(x = fct_inorder(Key), y = Value, 
+                   fill = Politics)) + 
+  geom_col(color = "black", position = 'dodge') +
+  geom_text(mapping = aes(label = format(Value, digits = 2)),
+            position = position_dodge(width = .9),
+            vjust = 1.5, size = 2.5, 
+            color = ifelse(f5.6_summary$Politics == "Centrist", 
+                           "black", "white")) + 
+  labs(title = "Political Leaning and Various Dating Metrics",
+       y = "Average",
+       subtitle = paste("n = ", nrow(f5.6_nrow))) +
+  scale_fill_manual(values = color_politics) +
+  add_theme + 
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.x = element_blank(),
+        legend.title = element_blank()) +
+  remove_gridlines
+
+png(filename = "S5/figure5.6.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f5.6)
+
+dev.off()
+
+# insight
+lm_polkiss <- lm(Q45_KissCount ~ as.numeric(Q26_PoliticalPhilosophy), 
+                 data = f5.6_nrow)
+summary(lm_polkiss)
+
+lm_polncmo <- lm(Q46_NCMOCount ~ as.numeric(Q26_PoliticalPhilosophy), 
+                data = f5.6_nrow)
+summary(lm_polncmo)
+
+lm_poldates <- lm(Q28_MonthlyDates ~ as.numeric(Q26_PoliticalPhilosophy),
+                  data = f5.6_nrow)
+anova(lm_poldates)
+
+lm_polrel <- lm(Q47_RelationshipCount ~ as.numeric(Q26_PoliticalPhilosophy),
+                data = f5.6_nrow)
+summary(lm_polrel)
+
+```
+
+# Relationships
+
+## Figure 6.1
+General Dating Statistics Between Genders
+
+```{r}
+
+f6.1_cols <- c(6, 48, 50, 51)
+
+f6.1_nrow <- survey %>% 
+  filter_na_out(f6.1_cols) %>% 
+  select(all_of(f6.1_cols)) %>% 
+  filter_sex()
+
+f6.1_data <- f6.1_nrow %>% 
+  gather(key = "Key", value = "Value",
+         which(sapply(., is.numeric)))  %>% 
+  mutate(Key = case_when(
+    Key == "Q45_KissCount" ~ "Kiss Count",
+    Key == "Q46_NCMOCount" ~ "NCMO Count",
+    Key == "Q47_RelationshipCount" ~ "Relationship Count"
+  )) 
+
+f6.1_summary <- f6.1_data %>% 
+  group_by(Q3_Sex, Key) %>% 
+  summarise(Value = mean(Value))
+
+
+f6.1 <- ggplot(data = f6.1_summary, 
+       mapping = aes(x = Key, color = Q3_Sex,
+                     y = Value, group = Q3_Sex)) +
+  geom_col(mapping = aes(fill = Q3_Sex),
+           color = "black", 
+           position = 'dodge') +
+  geom_text(mapping = aes(label = format(Value, digits = 3)),
+            position = position_dodge(width = .9),
+            vjust = 1.5, show.legend = F) +
+  scale_fill_manual(values = color_2_breaks) +
+  scale_color_manual(values = c("black", "white")) +
+  labs(title = "Dating Metrics by Gender",
+       subtitle = paste("n =", nrow(f6.1_nrow))) +
+  add_theme +
+  remove_gridlines +
+  theme(legend.title = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.y = element_blank())
+
+png(filename = "S6/figure6.1.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f6.1)
+
+dev.off()
+
+# insight
+f6.1_nrow %>% 
+  t_test(Q45_KissCount ~ Q3_Sex)
+
+f6.1_nrow %>% 
+  t_test(Q46_NCMOCount ~ Q3_Sex)
+
+f6.1_nrow %>% 
+  t_test(Q47_RelationshipCount ~ Q3_Sex)
+
+```
+
+
+## Figure 6.2a
+Percent of respondents who have zero stats on ... broken by gender
+
+```{r}
+
+f6.2a_cols <- c(6, 48, 50, 51)
+
+f6.2a_data <- survey %>% 
+  filter(Q6_RelationshipStatus == "Single") %>% 
+  filter_na_out(f6.2a_cols) %>% 
+  select(all_of(f6.2a_cols)) %>% 
+  filter_sex()
+
+f6.2a_summary <- f6.2a_data %>% 
+  group_by(Q3_Sex) %>% 
+  summarise(Q45_KissCount = mean(Q45_KissCount == 0),
+    Q46_NCMOCount = mean(Q46_NCMOCount == 0),
+    Q47_RelationshipCount = mean(Q47_RelationshipCount == 0)) %>%
+  gather(key = "Key", value = "Value",
+         which(sapply(., is.numeric)))  %>% 
+  mutate(Key = case_when(
+    Key == "Q45_KissCount" ~ "Never Kissed",
+    Key == "Q46_NCMOCount" ~ "No NCMOs",
+    Key == "Q47_RelationshipCount" ~ "No prior relationships"
+  )) 
+
+f6.2a <- ggplot(data = f6.2a_summary, 
+       mapping = aes(x = Key, fill = Q3_Sex, y = Value)) +
+  geom_col(color = "black", position = 'dodge') +
+  geom_text(mapping = aes(label = percent(Value, accuracy = .1),
+                          color = Q3_Sex),
+            position = position_dodge(width = .9),
+            vjust = 1.5, show.legend = F) +
+  scale_fill_manual(values = color_2_breaks) +
+  scale_color_manual(values = c("black", "white")) +
+  labs(title = "Percent Reporting None On Various Dating Metrics",
+       subtitle = paste("n =", nrow(f6.2a_data), sep = " *"),
+       caption = "*single people only",
+       y = "% with none") +
+  add_theme +
+  add_y_percent +
+  remove_gridlines +
+  theme(legend.title = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+  
+  
+png(filename = "S6/figure6.2a.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f6.2a)
+
+dev.off()
+
+# insight
+
+f6.2a_test <- f6.2a_data %>% 
+  group_by(Q3_Sex) %>% 
+  summarise(Count = n()) %>% 
+  full_join(f6.2_summary) %>% 
+  mutate(PropCount = Value * Count) %>% 
+  select(-Value) %>% 
+  spread(Key,PropCount)
+
+# kiss
+prop.test(x = c(148, 97), n = c(591, 511))
+
+# ncmo
+prop.test(x = c(343, 281), n = c(591, 511))
+
+# relationships
+prop.test(x = c(225, 131), n = c(591, 511))
+
+```
+
+## Figure 6.2b
+Percent of respondents who have zero stats on ... broken by college
+
+```{r}
+
+f6.2b_cols <- c(16, 48, 50, 51)
+
+f6.2b_data <- survey %>% 
+  filter(Q6_RelationshipStatus == "Single") %>% 
+  filter_na_out(f6.2b_cols) %>% 
+  select(all_of(f6.2b_cols)) %>% 
+  reset_college() %>% 
+  filter(Q13_CollegeName != "Other")
+
+f6.2b_summary <- f6.2b_data %>% 
+  group_by(Q13_CollegeName) %>% 
+  summarise(Q45_KissCount = mean(Q45_KissCount == 0),
+    Q46_NCMOCount = mean(Q46_NCMOCount == 0),
+    Q47_RelationshipCount = mean(Q47_RelationshipCount == 0)) %>%
+  gather(key = "Key", value = "Value",
+         which(sapply(., is.numeric)))  %>% 
+  mutate(Key = case_when(
+    Key == "Q45_KissCount" ~ "Never Kissed",
+    Key == "Q46_NCMOCount" ~ "No NCMOs",
+    Key == "Q47_RelationshipCount" ~ "No prior relationships"
+  )) %>% 
+  arrange(Value)
+
+f6.2b <- ggplot(data = f6.2b_summary, 
+       mapping = aes(x = Key, fill = fct_inorder(Q13_CollegeName), y = Value)) +
+  geom_col(color = "black", position = 'dodge') +
+  geom_text(mapping = aes(label = percent(Value, accuracy = 1)),
+            position = position_dodge(width = .9),
+            vjust = 1.5, show.legend = F, color = "white") +
+  scale_fill_manual(values = c(col3, coluvu, col2)) +
+  labs(title = "Percent Reporting None On Various Dating Metrics",
+       subtitle = paste("n =", nrow(f6.2b_data), sep = " *"),
+       caption = "*single people only",
+       y = "% with none") +
+  add_theme +
+  add_y_percent +
+  remove_gridlines +
+  theme(legend.title = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+  
+  
+png(filename = "S6/figure6.2b.png", width = 7, height = 4, units = "in", res = 540)
+
+print(f6.2b)
+
+dev.off()
+
+# insight
+
+f6.2b_test <- f6.2b_data %>% 
+  group_by(Q13_CollegeName) %>% 
+  summarise(Count = n()) %>% 
+  full_join(f6.2b_summary) %>% 
+  mutate(PropCount = Value * Count) %>% 
+  select(-Value) %>% 
+  spread(Key,PropCount)
+
+# kiss
+prop.test(x = c(214, 21, 8), n = c(869, 162, 63))
+
+# ncmo
+prop.test(x = c(529, 61, 27), n = c(869, 162, 63))
+
+# relationships
+prop.test(x = c(304, 35, 13), n = c(869, 162, 63))
+
+```
+
+
+## Figure 6.3
+Waiting for Missionary, Meeting Spouse, Relationships
+(Infographics)
+```{r}
+# insight
+
+# waiting for missionary %
+survey %>% 
+  filter_na_out('Q44_WaitingForMissionary') %>% 
+  select(Q44_WaitingForMissionary) %>% 
+  group_by(Q44_WaitingForMissionary) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count))
+
+# meet spouse %
+survey %>% 
+  filter_na_out('Q43_MeetSpouse') %>% 
+  select(Q43_MeetSpouse) %>% 
+  group_by(Q43_MeetSpouse) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count))
+
+survey %>% 
+  filter_na_out(c('Q43_MeetSpouse', 'Q13_CollegeName')) %>% 
+  select(Q43_MeetSpouse, Q13_CollegeName) %>% 
+  group_by(Q43_MeetSpouse, Q13_CollegeName) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  data.frame()
+
+# relationships
+survey %>% 
+  filter_na_out('Q6_RelationshipStatus') %>% 
+  select(Q6_RelationshipStatus) %>% 
+  group_by(Q6_RelationshipStatus) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count))
+
+survey %>% 
+  filter_na_out(c('Q3_Sex', 'Q6_RelationshipStatus')) %>% 
+  select(Q3_Sex, Q6_RelationshipStatus) %>% 
+  filter_sex() %>% 
+  mutate(Single = ifelse(Q6_RelationshipStatus == "Single", T, F)) %>% 
+  group_by(Single, Q3_Sex) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count))
+
+
+
+
+
+```
+
+## Figure 6.4
+Cheating vs Cheated on
+
+```{r}
+
+f6.4_cols <- c(54, 55)
+
+f6.4_data <- survey %>% 
+  filter(Q47_RelationshipCount > 0) %>% 
+  filter_na_out(f6.4_cols) %>% 
+  select(all_of(f6.4_cols)) 
+
+f6.4_summary <- f6.4_data %>% 
+  group_by(Q50_Cheater, Q51_Cheated) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count))
+
+f6.4 <- ggplot(data = f6.4_summary %>% 
+         filter(Q51_Cheated == "Yes"),
+       mapping = aes(x = Q50_Cheater, y = Prop)) +
+  geom_col(color = "black", fill = col4) + 
+  geom_text(mapping = aes(label = percent(Prop, accuracy = .01)),
+            position = 'stack', vjust = 1.5) +
+  labs(title = "Cheating vs. Being Cheated On",
+       subtitle = paste("n =", nrow(f6.2_data), sep = " *"),
+       caption = "*filtered to respondents who have been in one or more relationships",
+       x = "Have you ever cheated on someone?",
+       y = "Have you ever been cheated on?") +
+  add_theme +
+  add_y_percent +
+  remove_gridlines +
+  theme(plot.caption = element_text(size = 7))
+  
+png(filename = "S6/figure6.4.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f6.4)
+
+dev.off()
+
+
+# insight
+
+f6.4_summary
+
+prop.test(x = c(277, 22), n = c(974 + 277, 35 + 22))
+
+```
+
+## Figure 6.5a/b
+Being a cheater vs being cheated on pie chart
+
+```{r}
+#a
+
+f6.5a_data <- f6.4_data %>% 
+  group_by(Q50_Cheater) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  mutate(ypos = c(.57, .02))
+
+f6.5a <- ggplot(f6.5a_data, aes(x="", y=Prop, 
+                                fill=Q50_Cheater)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start=0) +
+  geom_text_repel(data = f6.5a_data %>% 
+              filter(Q50_Cheater == "Yes"),
+            aes(y = ypos, label = 
+                  paste(percent(Prop, accuracy = .1))), color = "black", size=6, nudge_x = .6) +
+  geom_text(data = f6.5a_data %>% 
+              filter(Q50_Cheater == "No"),
+            aes(y = ypos, label = 
+                  paste(percent(Prop, accuracy = .1))), color = "white", size=6) +
+  theme_void() +
+  labs(title = "Cheating in Relationships",
+       fill = "Have you \never cheated?") +
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        legend.position = "right") +
+  scale_fill_manual(values = c(col7, col2))
+
+png(filename = "S6/figure6.5a.png", width = 5, height = 4, units = "in", res = 540)
+
+print(f6.5a)
+
+dev.off()
+
+```
+
+``` {r}
+
+f6.5b_data <- f6.4_data %>% 
+  group_by(Q51_Cheated) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  mutate(ypos = c(.57, .125))
+
+f6.5b <- ggplot(f6.5b_data, aes(x="", y=Prop, 
+                                fill=Q51_Cheated)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start=0) +
+  geom_text(aes(y = ypos, label = 
+                  paste(percent(Prop, accuracy = .1))), color = "white", size=6, nudge_x = .2) +
+  geom_text(label = "", nudge_x = .6) +
+  theme_void() +
+  labs(title = "Being Cheated on in Relationships",
+       fill = "Have you \never been \ncheated on?") +
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        legend.position = "right") +
+  scale_fill_manual(values = c(col7, col2))
+
+png(filename = "S6/figure6.5b.png", width = 5, height = 4, units = "in", res = 540)
+
+print(f6.5b)
+
+dev.off()
+
+```
+
+# Dating Preferences 
+
+Physical preferences
+## Figure 7.1
+Sexual Orientation
+
+```{r}
+
+f7.1_cols <- c(6, 8)
+
+f7.1_data <- survey %>% 
+  filter_na_out(f7.1_cols) %>% 
+  select(all_of(f7.1_cols)) %>% 
+  reset_sex()
+
+f7.1_summary <- f7.1_data %>% 
+  group_by(Q3_Sex, Q5_SexualOrientation) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  filter(Q5_SexualOrientation == "Straight") %>% 
+  arrange(Prop)
+
+f7.1 <- ggplot(data = f7.1_summary, 
+       mapping = aes(x = fct_inorder(Q3_Sex), y = Prop)) +
+  geom_col(color = "black", fill = col4) +
+  geom_text(mapping = aes(label = percent(Prop, accuracy = .01)),
+            vjust = 2) +
+  labs(title = "Proportion of Straight Individuals and Gender",
+       subtitle = paste("n =", nrow(f7.1_data))) +
+  add_theme +
+  add_y_percent +
+  remove_vertical_gridlines +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+
+png(filename = "S7/figure7.1.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f7.1)
+
+dev.off()
+
+# insight
+
+f7.1_data %>% 
+  filter(Q3_Sex != "Other") %>% 
+  mutate(Q5_SexualOrientation = ifelse(Q5_SexualOrientation == "Straight", T, F)) %>% 
+  prop_test(Q5_SexualOrientation ~ Q3_Sex,
+            order = c("Male", "Female"))
+
+```
+
+## Figure 7.2a
+Preferred Hair Color (Male/Female)
+
+```{r}
+
+f7.2a_cols <- c(6, 65)
+
+f7.2a_data <- survey %>% 
+  filter(Q5_SexualOrientation == "Straight") %>% 
+  filter_na_out(f7.2a_cols) %>% 
+  select(all_of(f7.2a_cols)) %>% 
+  mutate(Q61_HottestHairColor = 
+           ifelse(Q61_HottestHairColor == "Dyed (Green, blue, purple, etc)", 
+                  "Dyed", Q61_HottestHairColor)) %>% 
+  filter_sex()
+
+f7.2a_summary <-  f7.2a_data %>% 
+  group_by(Q3_Sex, Q61_HottestHairColor) %>% 
+  summarise(Count = n(), .groups = 'drop') %>% 
+  complete(Q3_Sex, Q61_HottestHairColor, fill = list(Count = 0)) %>%  
+  group_by(Q3_Sex) %>%
+  mutate(Prop = Count / sum(Count)) %>% 
+  mutate(Q3_Sex = ifelse(Q3_Sex == "Male", "Men's Preference", "Women's Preference")) %>% 
+  arrange(desc(Prop))
+  
+f7.2a <- ggplot(data = f7.2a_summary, 
+               mapping = aes(x = fct_inorder(Q61_HottestHairColor), 
+                             y = Prop, fill = fct_rev(Q3_Sex))) +
+  geom_col(color = "black", position = 'dodge', width = .7) +
+  geom_text(mapping = aes(label = percent(Prop, accuracy = 1),
+            color = ifelse(f7.2a_summary$Prop > .04, fct_rev(Q3_Sex), '1')),
+            position = position_dodge(width = .7),
+            vjust = ifelse(f7.2a_summary$Prop > .04, 1.5, -1), 
+            hjust = 0.5,
+            show.legend = F) +
+  scale_color_manual(values = c("black", "white", "black")) +
+  scale_fill_manual(values = (color_2_breaks)) + 
+  labs(title = "Most Attractive Hair Color According To Gender") +
+  add_theme +
+  add_y_percent +
+  remove_vertical_gridlines +
+  theme(legend.title = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+
+png(filename = "S7/figure7.2a.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f7.2a)
+
+dev.off()
+
+
+
+```
+
+
+## Figure 7.2b 
+Preferred Hair Color (department)
+
+```{r}
+
+f7.2b_cols <- c(6, 16, 18, 65)
+
+f7.2b_data <- survey %>% 
+  filter(Q5_SexualOrientation == "Straight") %>% 
+  filter(Q13_CollegeName == "BYU") %>% 
+  filter_na_out(f7.2b_cols) %>% 
+  select(all_of(f7.2b_cols)) %>% 
+  filter_sex() %>% 
+  clean_byu_major_names() %>% 
+  left_join(cdm_final, by = join_by(Q15_Major == major)) %>% 
+  filter(!is.na(department)) %>% 
+  clean_misc_major() %>% 
+  mutate(Q61_HottestHairColor = 
+           ifelse(Q61_HottestHairColor == "Dyed (Green, blue, purple, etc)", 
+                  "Dyed", Q61_HottestHairColor)) 
+
+f7.2b_top_males <- f7.2b_data %>%
+  filter(Q3_Sex == "Male") %>%
+  group_by(department) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count)) %>%
+  head(n = 10) %>%
+  pull(department)
+
+f7.2b_top_females <- f7.2b_data %>%
+  filter(Q3_Sex == "Female") %>%
+  group_by(department) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count)) %>%
+  head(n = 10) %>%
+  pull(department)
+
+f7.2b_top_majors <- union(f7.2b_top_males, f7.2b_top_females)
+f7.2b_summary <- f7.2b_data %>%
+  filter(department %in% f7.2b_top_majors) %>%
+  group_by(Q3_Sex, department, Q61_HottestHairColor) %>%
+  summarise(Count = n()) %>%
+  mutate(Prop = Count / sum(Count)) %>%
+  filter((Q3_Sex == "Female" & department %in% f7.2b_top_females) | 
+         (Q3_Sex == "Male" & department %in% f7.2b_top_males)) %>%
+  mutate(Q61_HottestHairColor = factor(Q61_HottestHairColor,
+                                       levels = c("Brunette", "Blonde", "Red", "Dyed", "Black"))) %>%
+  group_by(Q3_Sex, department) %>%
+  mutate(Brunette_Prop = Prop[Q61_HottestHairColor == "Brunette"]) %>%
+  ungroup() %>%
+  arrange(Q3_Sex, desc(Brunette_Prop), department, desc(Prop)) %>% 
+  mutate(Q3_Sex = ifelse(Q3_Sex == "Male", "Men's Preference", "Women's Preference")) 
+
+
+
+strip_sex_from_labels <- function(x) {
+  sapply(strsplit(as.character(x), "\\."), `[`, 1)
+}
+
+f7.2b <- ggplot(data = f7.2b_summary,
+       mapping = aes(x = fct_inorder(interaction(department, Q3_Sex)),
+                     y = (Prop), fill = Q61_HottestHairColor)) +
+  geom_col(color = "black", position = position_stack(reverse = T)) +
+  geom_text(mapping = aes(label = ifelse(
+                            Prop > .045,
+                            percent(Prop, accuracy = 1), 
+                          "")),
+            position = position_stack(vjust = .5, reverse = T),
+            hjust = 0.5, size = 2.5,
+            show.legend = F) +
+  facet_wrap(~ Q3_Sex, scales = 'free_x') +
+  scale_x_discrete(labels = strip_sex_from_labels) +  
+  scale_fill_manual(values = c("tan", col3, "pink3", 
+                                   "lightblue", "gray70")) +
+  labs(title = "Most Attractive Hair Color According To Top 10 Majors For Each Sex",
+       y = "") +
+  add_theme +
+  add_y_percent +
+  add_tilt +
+  remove_vertical_gridlines +
+  theme(legend.title = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 6)) 
+
+png(filename = "S7/figure7.2b.png", width = 7, height = 4, units = "in", res = 540)
+
+print(f7.2b)
+
+dev.off()
+
+
+```
+
+
+## Table 7.1a/b
+Top 10 Most Attractive Major (Male/Female)
+
+```{r}
+
+t7.1_cols <- c(6, 64)
+
+t7.1_data <- survey %>% 
+  filter_na_out(t7.1_cols) %>% 
+  select(all_of(t7.1_cols)) %>% 
+  filter_sex() %>% 
+  group_by(Q3_Sex, Q60_MostAttractiveMajor) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  arrange(desc(Prop)) %>% 
+  group_by(Q3_Sex) %>% 
+  slice_max(order_by = Prop, n = 5) %>%  
+  ungroup() %>% 
+  mutate(Prop = percent(Prop, accuracy = .1))
+
+kable(t7.1_data, digits = 2)
+
+```
+
+## Figure 7.3 (and 7.4)
+Preferred Height for Women
+
+```{r}
+
+f7.3_data_menheight <- survey_female %>% 
+  filter_na_out(c("Q9_Height", "Q62_BoysMinHeight")) %>% 
+  select(c("Q9_Height", "Q62_BoysMinHeight")) %>% 
+  mutate(Diff = Q62_BoysMinHeight-Q9_Height) %>% 
+  filter(abs(Diff) <= 18)
+
+f7.3_data <- survey %>% 
+  filter_na_out(c("Q3_Sex" ,"Q9_Height")) %>% 
+  select(Q3_Sex, Q9_Height) %>% 
+  filter_sex() 
+
+# simulating potential differences between male/female
+n <- 50000
+
+sample_female <- f7.3_data_menheight[sample(x = 1:nrow(f7.3_data_menheight),
+                        size = n, replace = T),]
+sample_male <- sample(x = f7.3_data$Q9_Height[f7.3_data$Q3_Sex == "Male"],
+                        size = n, replace = T)
+sample_diffs <- sample_male - sample_female$Q9_Height
+sample_reqs <- sample_male - sample_female$Q62_BoysMinHeight
+
+f7.3 <- ggplot() +
+  geom_density(mapping = aes(x = f7.3_data_menheight$Diff, 
+       fill = "Minimum Height Requirement - Women's Heights"),
+       bw = 1, alpha = .8) +
+  geom_density(mapping = aes(x = sample_diffs, 
+       fill = "Simulated Men's Heights - Women's Heights"), 
+       bw = 1, alpha = .8) +
+  xlim(c(-10, 25)) +
+  scale_fill_manual(values = c("Minimum Height Requirement - Women's Heights" = col4, 
+                               "Simulated Men's Heights - Women's Heights" = col2)) +
+  labs(title = "Simulation of Women's Height and Their Preferred Height \nin Male Partner",
+       x = "Difference (Inches)",
+       y = "Density") +
+  add_theme +
+  remove_vertical_gridlines +
+  theme(legend.title = element_blank())
+
+png(filename = "S7/figure7.3.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f7.3)
+
+dev.off()
+
+# quick insights
+
+sum(sample_diffs < 0) / n
+# 7% of women may find a man at least an inch shorter than her
+sum(sample_reqs < 0) / n
+# 20% of women will not find a man that meets their height requirements 
+
+# to view simulation
+sim_study <- cbind(sample_female, 'RandomMalePartnerHeight' = sample_male, 'MinHeightMet' = sample_reqs >= 0, "MinHeightDiff" = sample_reqs)
+sim_study
+
+### FIGURE 7.4
+
+metprob <- f7.3_data %>% 
+  filter(Q3_Sex == "Male") %>% 
+  group_by(Q9_Height) %>% 
+  summarise(Count = n()) %>% 
+  arrange(desc(Q9_Height)) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  mutate(CumProp = cumsum(Prop))
+
+prefprob <- f7.3_data_menheight %>% 
+  group_by(Q62_BoysMinHeight) %>% 
+  summarise(Count = n()) %>% 
+  arrange(Q62_BoysMinHeight) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  mutate(CumProp = cumsum(Prop))
+
+f7.4 <- ggplot() +
+  geom_smooth(data = metprob, 
+              mapping = aes(x = Q9_Height,
+                            y = CumProp,
+                            color = "% of Men At Least This Height"), 
+              se = F, span = .3) +
+  geom_smooth(data = prefprob,
+              mapping = aes(x = Q62_BoysMinHeight,
+                            y = CumProp,
+              color = "Likelihood of Meeting Women's Standards"), 
+              se = F, span = .3) +
+  labs(title = "Women's Height Preferences and Likelihood",
+       x = "Minimum Height (inches)",
+       y = "Probability") +
+  scale_color_manual(values = c("% of Men At Least This Height" = col4,
+                     "Likelihood of Meeting Women's Standards" = col8)) +
+  add_theme +
+  add_y_percent +
+  theme(plot.title = element_text(size = 10),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 5),
+        legend.box = 'vertical') +
+  xlim(c(55, 80))
+
+png(filename = "S7/figure7.4.png", width = 4, height = 4, units = "in", res = 540)
+
+print(f7.4)
+
+dev.off()
+
+```
+
+Dating app preferences
+## Figure 7.5
+Dating App Users (and Hours)
+
+```{r}
+
+f7.5_cols <- c(56)
+
+f7.5_data <- survey %>% 
+  filter_na_out(f7.5_cols) %>% 
+  select(all_of(f7.5_cols)) %>% 
+  parse_string_values(col_name = "Q52_DatingApps", 
+                      append_col_name = "Q52_DatingApps") %>% 
+  select(-1)
+
+f7.5_summary <- f7.5_data %>% 
+  colMeans() %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = "App") %>% 
+  rename(Prop = ".") %>% 
+  arrange(desc(Prop)) %>% 
+  filter(App != "None") 
+
+f7.5 <- ggplot(data = f7.5_summary,
+       mapping = aes(x = fct_inorder(App), y = Prop, 
+                     fill = fct_inorder(App))) +
+  geom_col(color = "black", show.legend = F) +
+  geom_text(data = f7.5_summary %>% 
+              filter(Prop >= .05),
+            mapping = aes(label = percent(Prop, accuracy = .1),
+            color = ifelse(Prop < .2, '1', '2')),
+            vjust = 1.5, show.legend = F) +
+  geom_text(data = f7.5_summary %>% 
+              filter(Prop < .05),
+            mapping = aes(label = percent(Prop, accuracy = .1)),
+            color = 'black',
+            vjust = -1, show.legend = F) +
+  scale_fill_manual(values = color_dating_apps) +
+  scale_color_manual(values = c('1' = "black", '2' = "white")) +
+  labs(title = "Popular Dating Apps",
+       subtitle = paste("n =", nrow(f7.5_data)),
+       x = "App Name") +
+  add_theme +
+  add_y_percent +
+  remove_gridlines +
+  theme(axis.title.y = element_blank())
+
+png(filename = "S7/figure7.5.png", width = 6, height = 4, units = "in", res = 540)
+
+print(f7.5)
+
+dev.off()
+
+```
+
+## Figure 7.6
+Gender bar chart of premium dating app users
+
+```{r}
+
+f7.6_cols <- c(6, 57)
+
+f7.6_data <- survey %>% 
+  filter_na_out(f7.6_cols) %>% 
+  select(all_of(f7.6_cols)) %>% 
+  filter_sex()
+
+f7.6_summary <- f7.6_data %>% 
+  group_by(Q3_Sex, Q53_DatingAppPremium) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Prop = Count / sum(Count)) %>% 
+  filter(Q53_DatingAppPremium == "Yes")
+
+f7.6 <- ggplot(data = f7.6_summary, 
+       mapping = aes(x = Q3_Sex, y = Prop, fill = Q3_Sex, color = Q3_Sex)) +
+  geom_col(color = "black", show.legend = F) +
+  geom_text(mapping = aes(label = percent(Prop, accuracy = .01)),
+            vjust = 1.5, show.legend = F) +
+  scale_fill_manual(values = color_2_breaks) +
+  scale_color_manual(values = c("black", "white")) +
+  labs(title = "Premium Dating App Users by Gender",
+       subtitle = paste("n =", nrow(f7.6_data))) +
+  add_theme +
+  remove_gridlines +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.line = element_line(color='black'),
+        panel.border = element_blank(),
+        plot.title = element_text(size = 11))
+
+png(filename = "S7/figure7.6.png", width = 4, height = 4, units = "in", res = 540)
+
+print(f7.6)
+
+dev.off()
+
+# insight
+
+
+f7.6_data %>% 
+  prop_test(Q53_DatingAppPremium ~ Q3_Sex,
+            order = c("Male", "Female"))
+
+
+
+
+```
+
+
+## Figure 7.7 
+Top reasons to swipe down (Male/Female)
+
+```{r}
+
+f7.7_cols <- c(6, 58)
+
+f7.7_data <- survey %>% 
+  filter_na_out(f7.7_cols) %>% 
+  select(all_of(f7.7_cols))
+
+f7.7_data_male <- f7.7_data %>% 
+  filter(Q3_Sex == "Male") %>% 
+  parse_string_values(col_name = "Q54_SwipeDownMain", 
+                      append_col_name = "Q54_SwipeDownMain") %>% 
+  select(-1) %>% 
+  colMeans() %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = "SwipeDownReason") %>% 
+  rename(Prop = ".") %>% 
+  arrange(desc(Prop)) %>% 
+  mutate(Q3_Sex = "Male") %>% 
+  mutate(SwipeDownReason = ifelse(
+    str_detect(SwipeDownReason, "too good for me"), "Looks \"out of my league\"", SwipeDownReason))
+
+f7.7_data_female <- f7.7_data %>% 
+  filter(Q3_Sex == "Female") %>% 
+  parse_string_values(col_name = "Q54_SwipeDownMain", 
+                      append_col_name = "Q54_SwipeDownMain") %>% 
+  select(-1) %>% 
+  colMeans() %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = "SwipeDownReason") %>% 
+  rename(Prop = ".") %>% 
+  arrange(desc(Prop)) %>% 
+  mutate(Q3_Sex = "Female") 
+
+f7.7_summary <- rbind(f7.7_data_female, f7.7_data_male) %>% 
+  arrange(Prop) %>% 
+  filter(SwipeDownReason != "Other")
+
+f7.7 <- ggplot(data = f7.7_summary,
+               mapping = aes(x = Prop, 
+                             y = fct_inorder(
+                               interaction(SwipeDownReason, Q3_Sex)),
+                             fill = Q3_Sex)) +
+  geom_col(color = "black", show.legend = F, width = .98) +
+  scale_y_discrete(labels = strip_sex_from_labels) +  
+  facet_wrap(~ Q3_Sex, scales = 'free_y', nrow = 2, axes = "all_x") +
+  scale_fill_manual(values = color_2_breaks) +
+  labs(title = "Main Reasons for Swiping Down on a Dating Profile",
+       subtitle = paste("n =", nrow(f7.7_data)),
+       y = "") +
+  add_theme +
+  add_x_percent +
+  remove_horizontal_gridlines +
+  theme(axis.title.x = element_blank())
+ 
+png(filename = "S7/figure7.7.png", width = 6, height = 6, units = "in", res = 540)
+
+print(f7.7)
+
+dev.off()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
